@@ -1,11 +1,10 @@
+import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-
-export const runtime = "nodejs";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Public routes — skip all Supabase session handling
+  // Public routes — pass through without session check
   if (
     pathname === "/login" ||
     pathname.startsWith("/api/auth") ||
@@ -14,24 +13,43 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Protected routes — check Supabase session
-  try {
-    const { updateSession } = await import("@/lib/supabase/middleware");
-    const { user, supabaseResponse } = await updateSession(request);
+  // Create a response that we'll modify with refreshed cookies
+  let supabaseResponse = NextResponse.next({ request });
 
-    if (!user) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/login";
-      return NextResponse.redirect(url);
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) =>
+            request.cookies.set(name, value)
+          );
+          supabaseResponse = NextResponse.next({ request });
+          cookiesToSet.forEach(({ name, value, options }) =>
+            supabaseResponse.cookies.set(name, value, options)
+          );
+        },
+      },
     }
+  );
 
-    return supabaseResponse;
-  } catch {
-    // If Supabase check fails, redirect to login
+  // Refresh the session — this is critical for Supabase auth to work
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  // If no user and on a protected route, redirect to login
+  if (!user) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
+
+  return supabaseResponse;
 }
 
 export const config = {
