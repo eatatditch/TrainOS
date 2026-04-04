@@ -7,8 +7,17 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Save, Trash2, FileText, X } from "lucide-react";
 import Link from "next/link";
+import { FileUpload } from "@/components/admin/file-upload";
+
+interface ModuleAsset {
+  id: string;
+  fileName: string;
+  fileUrl: string;
+  fileType: string;
+  fileSize: number;
+}
 
 export default function EditModulePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -16,6 +25,7 @@ export default function EditModulePage({ params }: { params: Promise<{ id: strin
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sections, setSections] = useState<{ id: string; title: string }[]>([]);
+  const [assets, setAssets] = useState<ModuleAsset[]>([]);
   const [form, setForm] = useState({
     sectionId: "",
     title: "",
@@ -27,9 +37,13 @@ export default function EditModulePage({ params }: { params: Promise<{ id: strin
     tags: "",
   });
 
+  const fetchModule = () => {
+    return fetch(`/api/admin/modules/${id}`).then((r) => r.json());
+  };
+
   useEffect(() => {
     Promise.all([
-      fetch(`/api/admin/modules/${id}`).then((r) => r.json()),
+      fetchModule(),
       fetch("/api/admin/sections").then((r) => r.json()),
     ]).then(([mod, secs]) => {
       setForm({
@@ -42,6 +56,7 @@ export default function EditModulePage({ params }: { params: Promise<{ id: strin
         isActive: mod.isActive,
         tags: (mod.tags || []).join(", "),
       });
+      setAssets(mod.assets || []);
       setSections(secs);
       setLoading(false);
     });
@@ -66,6 +81,30 @@ export default function EditModulePage({ params }: { params: Promise<{ id: strin
     if (!confirm("Delete this module? This cannot be undone.")) return;
     await fetch(`/api/admin/modules/${id}`, { method: "DELETE" });
     router.push("/admin/content");
+  };
+
+  const handleDeleteAsset = async (assetId: string) => {
+    if (!confirm("Delete this file?")) return;
+    const res = await fetch(`/api/admin/modules/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deleteAssetId: assetId }),
+    });
+    if (res.ok) {
+      setAssets((prev) => prev.filter((a) => a.id !== assetId));
+    }
+  };
+
+  const handleUploadComplete = (data: any) => {
+    if (data.asset) {
+      setAssets((prev) => [...prev, data.asset]);
+    }
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   if (loading) {
@@ -158,6 +197,50 @@ export default function EditModulePage({ params }: { params: Promise<{ id: strin
               />
               <span className="text-sm text-gray-700">Active</span>
             </label>
+          </div>
+
+          {/* File Attachments Section */}
+          <div className="pt-4 border-t">
+            <h3 className="text-sm font-medium text-gray-700 mb-3">File Attachments</h3>
+
+            {assets.length > 0 && (
+              <div className="space-y-2 mb-4">
+                {assets.map((asset) => (
+                  <div
+                    key={asset.id}
+                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border"
+                  >
+                    <div className="flex items-center gap-3">
+                      <FileText className="w-4 h-4 text-gray-400" />
+                      <div>
+                        <a
+                          href={asset.fileUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm font-medium text-gray-900 hover:text-ditch-orange"
+                        >
+                          {asset.fileName}
+                        </a>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <Badge>{asset.fileType}</Badge>
+                          {asset.fileSize > 0 && (
+                            <span className="text-xs text-gray-400">{formatFileSize(asset.fileSize)}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteAsset(asset.id)}
+                      className="p-1 hover:bg-gray-200 rounded text-gray-400 hover:text-red-500 transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <FileUpload moduleId={id} onUploadComplete={handleUploadComplete} />
           </div>
 
           <div className="flex gap-3 justify-end pt-4 border-t">
