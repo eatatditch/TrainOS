@@ -154,47 +154,75 @@ export default async function ModuleDetailPage({
           <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
             <ImageIcon className="w-5 h-5 text-ditch-orange" /> Photos & Images
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="space-y-4">
             {images.map((img: any) => (
-              <div key={img.id} className="aspect-square bg-gray-100 rounded-lg flex items-center justify-center overflow-hidden">
-                <div className="text-center p-4">
-                  <ImageIcon className="w-8 h-8 text-gray-400 mx-auto mb-1" />
-                  <p className="text-xs text-gray-500 truncate">{img.fileName}</p>
-                </div>
+              <div key={img.id}>
+                <img
+                  src={img.fileUrl}
+                  alt={img.fileName}
+                  className="w-full rounded-lg border border-gray-200"
+                  loading="lazy"
+                />
+                <p className="text-sm text-gray-500 mt-2">{img.fileName}</p>
               </div>
             ))}
           </div>
         </Card>
       )}
 
-      {/* Documents & Downloads */}
+      {/* Documents — PDFs inline, others as download */}
       {documents.length > 0 && (
         <Card>
           <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
             <FileText className="w-5 h-5 text-ditch-orange" /> Documents & Files
           </h2>
-          <div className="space-y-2">
-            {documents.map((doc: any) => (
-              <div key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <FileText className="w-5 h-5 text-ditch-navy" />
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{doc.fileName}</p>
-                    <p className="text-xs text-gray-500 capitalize">{doc.fileType.toLowerCase()}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {doc.isPrintable && (
-                    <a href={doc.fileUrl} target="_blank" className="p-2 hover:bg-gray-200 rounded-lg transition-colors" title="Print">
-                      <Printer className="w-4 h-4 text-gray-500" />
-                    </a>
+          <div className="space-y-4">
+            {documents.map((doc: any) => {
+              const isPdf = doc.fileName?.toLowerCase().endsWith(".pdf") || doc.fileType === "PDF";
+              return (
+                <div key={doc.id}>
+                  {isPdf ? (
+                    <div>
+                      <iframe
+                        src={`${doc.fileUrl}#toolbar=1&navpanes=0`}
+                        className="w-full rounded-lg border border-gray-200"
+                        style={{ height: "600px" }}
+                        title={doc.fileName}
+                      />
+                      <div className="flex items-center justify-between mt-2">
+                        <p className="text-sm text-gray-500">{doc.fileName}</p>
+                        <div className="flex items-center gap-2">
+                          <a href={doc.fileUrl} target="_blank" className="text-xs text-ditch-orange hover:underline">
+                            Open in new tab
+                          </a>
+                          <a href={doc.fileUrl} download className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors" title="Download">
+                            <Download className="w-4 h-4 text-gray-400" />
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <FileText className="w-5 h-5 text-ditch-navy" />
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{doc.fileName}</p>
+                          <p className="text-xs text-gray-500 capitalize">{doc.fileType.toLowerCase()}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <a href={doc.fileUrl} target="_blank" className="text-xs text-ditch-orange hover:underline">
+                          View
+                        </a>
+                        <a href={doc.fileUrl} download className="p-2 hover:bg-gray-200 rounded-lg transition-colors" title="Download">
+                          <Download className="w-4 h-4 text-gray-500" />
+                        </a>
+                      </div>
+                    </div>
                   )}
-                  <a href={doc.fileUrl} download className="p-2 hover:bg-gray-200 rounded-lg transition-colors" title="Download">
-                    <Download className="w-4 h-4 text-gray-500" />
-                  </a>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
       )}
