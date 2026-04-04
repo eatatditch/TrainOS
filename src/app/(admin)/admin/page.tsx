@@ -11,51 +11,56 @@ import Link from "next/link";
 
 export default async function AdminDashboardPage() {
   const [
-    totalUsers, activeUsers, totalModules, totalSections,
-    totalAssignments, totalCompletions, quizAttempts,
-    overdueAssignments, recentAnnouncements, roleStats,
+    totalUsersResult, activeUsersResult, totalModulesResult, totalSectionsResult,
+    totalAssignmentsResult, totalCompletionsResult, quizAttemptsResult,
+    overdueAssignmentsResult, recentAnnouncementsResult, activeUsersForRolesResult,
   ] = await Promise.all([
-    db.user.count(),
-    db.user.count({ where: { isActive: true } }),
-    db.module.count({ where: { isActive: true } }),
-    db.section.count({ where: { isActive: true } }),
-    db.moduleAssignment.count(),
-    db.moduleCompletion.count(),
-    db.quizAttempt.findMany({ select: { score: true, passed: true } }),
-    db.moduleAssignment.count({
-      where: { dueDate: { lt: new Date() }, status: { not: "COMPLETED" } },
-    }),
-    db.announcement.findMany({
-      where: { isActive: true },
-      orderBy: { createdAt: "desc" },
-      take: 5,
-    }),
-    db.user.groupBy({
-      by: ["role"],
-      _count: true,
-      where: { isActive: true },
-    }),
+    db.from("User").select("*", { count: "exact", head: true }),
+    db.from("User").select("*", { count: "exact", head: true }).eq("isActive", true),
+    db.from("Module").select("*", { count: "exact", head: true }).eq("isActive", true),
+    db.from("Section").select("*", { count: "exact", head: true }).eq("isActive", true),
+    db.from("ModuleAssignment").select("*", { count: "exact", head: true }),
+    db.from("ModuleCompletion").select("*", { count: "exact", head: true }),
+    db.from("QuizAttempt").select("score, passed"),
+    db.from("ModuleAssignment").select("*", { count: "exact", head: true }).lt("dueDate", new Date().toISOString()).neq("status", "COMPLETED"),
+    db.from("Announcement").select("*").eq("isActive", true).order("createdAt", { ascending: false }).limit(5),
+    db.from("User").select("role").eq("isActive", true),
   ]);
+
+  const totalUsers = totalUsersResult.count ?? 0;
+  const activeUsers = activeUsersResult.count ?? 0;
+  const totalModules = totalModulesResult.count ?? 0;
+  const totalSections = totalSectionsResult.count ?? 0;
+  const totalAssignments = totalAssignmentsResult.count ?? 0;
+  const totalCompletions = totalCompletionsResult.count ?? 0;
+  const quizAttempts = quizAttemptsResult.data || [];
+  const overdueAssignments = overdueAssignmentsResult.count ?? 0;
+  const recentAnnouncements = recentAnnouncementsResult.data || [];
+
+  // Group by role in JS
+  const activeUsersForRoles = activeUsersForRolesResult.data || [];
+  const roleCountMap: Record<string, number> = {};
+  for (const u of activeUsersForRoles) {
+    roleCountMap[u.role] = (roleCountMap[u.role] || 0) + 1;
+  }
+  const roleStats = Object.entries(roleCountMap).map(([role, count]) => ({ role, _count: count }));
 
   const completionRate = totalAssignments > 0
     ? Math.round((totalCompletions / totalAssignments) * 100)
     : 0;
   const avgScore = quizAttempts.length > 0
-    ? Math.round(quizAttempts.reduce((a, b) => a + b.score, 0) / quizAttempts.length)
+    ? Math.round(quizAttempts.reduce((a: number, b: any) => a + b.score, 0) / quizAttempts.length)
     : 0;
   const passRate = quizAttempts.length > 0
-    ? Math.round((quizAttempts.filter((a) => a.passed).length / quizAttempts.length) * 100)
+    ? Math.round((quizAttempts.filter((a: any) => a.passed).length / quizAttempts.length) * 100)
     : 0;
 
   // Recent completions
-  const recentCompletions = await db.moduleCompletion.findMany({
-    include: {
-      user: { select: { firstName: true, lastName: true } },
-      module: { select: { title: true } },
-    },
-    orderBy: { completedAt: "desc" },
-    take: 10,
-  });
+  const { data: recentCompletions } = await db
+    .from("ModuleCompletion")
+    .select("*, user:User(firstName, lastName), module:Module(title)")
+    .order("completedAt", { ascending: false })
+    .limit(10);
 
   return (
     <div className="space-y-6">
@@ -112,10 +117,10 @@ export default async function AdminDashboardPage() {
           <CardTitle className="mb-4">Recent Completions</CardTitle>
           <CardContent>
             <div className="space-y-3">
-              {recentCompletions.length === 0 ? (
+              {(recentCompletions || []).length === 0 ? (
                 <p className="text-sm text-gray-500 text-center py-4">No completions yet</p>
               ) : (
-                recentCompletions.map((c) => (
+                (recentCompletions || []).map((c: any) => (
                   <div key={c.id} className="flex items-center justify-between text-sm">
                     <div>
                       <span className="font-medium text-gray-900">
@@ -147,7 +152,7 @@ export default async function AdminDashboardPage() {
               {recentAnnouncements.length === 0 ? (
                 <p className="text-sm text-gray-500 text-center py-4">No active announcements</p>
               ) : (
-                recentAnnouncements.map((ann) => (
+                recentAnnouncements.map((ann: any) => (
                   <div key={ann.id} className="flex items-start justify-between p-3 bg-gray-50 rounded-lg">
                     <div>
                       <div className="flex items-center gap-2">

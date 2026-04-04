@@ -10,23 +10,28 @@ export default async function TakeQuizPage({ params }: { params: Promise<{ quizI
   const user = await getUser();
   if (!user) redirect("/login");
 
-  const quiz = await db.quiz.findUnique({
-    where: { id: quizId },
-    include: {
-      questions: { orderBy: { sortOrder: "asc" } },
-      module: { include: { section: true } },
-    },
-  });
+  const { data: quiz } = await db
+    .from("Quiz")
+    .select("*, questions:QuizQuestion(*), module:Module(*, section:Section(*))")
+    .eq("id", quizId)
+    .single();
 
   if (!quiz) notFound();
 
-  const attempts = await db.quizAttempt.findMany({
-    where: { userId: user.id, quizId },
-  });
+  // Sort questions by sortOrder in JS
+  const sortedQuestions = (quiz.questions || []).sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+
+  const { data: attemptsData } = await db
+    .from("QuizAttempt")
+    .select("*")
+    .eq("userId", user.id)
+    .eq("quizId", quizId);
+
+  const attempts = attemptsData || [];
 
   const canTake = quiz.retryLimit === 0 || attempts.length < quiz.retryLimit;
 
-  const questionsForClient = quiz.questions.map((q) => ({
+  const questionsForClient = sortedQuestions.map((q: any) => ({
     id: q.id,
     questionText: q.questionText,
     questionType: q.questionType,
@@ -54,7 +59,7 @@ export default async function TakeQuizPage({ params }: { params: Promise<{ quizI
       )}
 
       <div className="flex gap-4 text-sm text-gray-500">
-        <span>{quiz.questions.length} questions</span>
+        <span>{sortedQuestions.length} questions</span>
         <span>Passing: {quiz.passingScore}%</span>
         <span>Attempts: {attempts.length}{quiz.retryLimit > 0 ? `/${quiz.retryLimit}` : ""}</span>
       </div>

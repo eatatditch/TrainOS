@@ -10,20 +10,35 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const { id } = await params;
-  const employee = await db.user.findUnique({
-    where: { id },
-    select: {
-      id: true, email: true, firstName: true, lastName: true, role: true,
-      location: true, phone: true, hireDate: true, isActive: true, createdAt: true,
-      assignments: { include: { module: { include: { section: true } } } },
-      completions: { include: { module: true } },
-      quizAttempts: { include: { quiz: true }, orderBy: { completedAt: "desc" } },
-      trainingPaths: { include: { trainingPath: true } },
-    },
-  });
+
+  const { data: employee } = await db
+    .from("User")
+    .select("id, email, firstName, lastName, role, location, phone, hireDate, isActive, createdAt")
+    .eq("id", id)
+    .single();
 
   if (!employee) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(employee);
+
+  // Fetch related data separately
+  const [
+    { data: assignments },
+    { data: completions },
+    { data: quizAttempts },
+    { data: trainingPaths },
+  ] = await Promise.all([
+    db.from("ModuleAssignment").select("*, module:Module(*, section:Section(*))").eq("userId", id),
+    db.from("ModuleCompletion").select("*, module:Module(*)").eq("userId", id),
+    db.from("QuizAttempt").select("*, quiz:Quiz(*)").eq("userId", id).order("completedAt", { ascending: false }),
+    db.from("UserTrainingPath").select("*, trainingPath:TrainingPath(*)").eq("userId", id),
+  ]);
+
+  return NextResponse.json({
+    ...employee,
+    assignments: assignments || [],
+    completions: completions || [],
+    quizAttempts: quizAttempts || [],
+    trainingPaths: trainingPaths || [],
+  });
 }
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -36,7 +51,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const data = await request.json();
 
   if (data.password) {
-    const existingUser = await db.user.findUnique({ where: { id }, select: { authId: true } });
+    const { data: existingUser } = await db
+      .from("User")
+      .select("authId")
+      .eq("id", id)
+      .single();
+
     if (existingUser?.authId) {
       const supabaseAdmin = await createAdminClient();
       await supabaseAdmin.auth.admin.updateUserById(existingUser.authId, { password: data.password });
@@ -52,8 +72,14 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (data.phone !== undefined) updateData.phone = data.phone;
   if (data.isActive !== undefined) updateData.isActive = data.isActive;
 
-  const updatedUser = await db.user.update({ where: { id }, data: updateData });
+  const { data: updatedUser, error } = await db
+    .from("User")
+    .update(updateData)
+    .eq("id", id)
+    .select()
+    .single();
 
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ id: updatedUser.id, email: updatedUser.email, firstName: updatedUser.firstName, lastName: updatedUser.lastName });
 }
 
@@ -64,6 +90,6 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   }
 
   const { id } = await params;
-  await db.user.update({ where: { id }, data: { isActive: false } });
+  await db.from("User").update({ isActive: false }).eq("id", id);
   return NextResponse.json({ success: true });
 }

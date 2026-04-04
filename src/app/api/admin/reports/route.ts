@@ -11,71 +11,79 @@ export async function GET(request: NextRequest) {
   const type = request.nextUrl.searchParams.get("type") || "overview";
 
   if (type === "overview") {
-    const [totalUsers, activeUsers, totalModules, totalAssignments, completions, quizAttempts] = await Promise.all([
-      db.user.count(),
-      db.user.count({ where: { isActive: true } }),
-      db.module.count({ where: { isActive: true } }),
-      db.moduleAssignment.count(),
-      db.moduleCompletion.count(),
-      db.quizAttempt.findMany({ select: { score: true, passed: true } }),
+    const [
+      { count: totalUsers },
+      { count: activeUsers },
+      { count: totalModules },
+      { count: totalAssignments },
+      { count: completions },
+      { data: quizAttempts },
+    ] = await Promise.all([
+      db.from("User").select("*", { count: "exact", head: true }),
+      db.from("User").select("*", { count: "exact", head: true }).eq("isActive", true),
+      db.from("Module").select("*", { count: "exact", head: true }).eq("isActive", true),
+      db.from("ModuleAssignment").select("*", { count: "exact", head: true }),
+      db.from("ModuleCompletion").select("*", { count: "exact", head: true }),
+      db.from("QuizAttempt").select("score, passed"),
     ]);
 
-    const avgScore = quizAttempts.length > 0
-      ? Math.round(quizAttempts.reduce((a, b) => a + b.score, 0) / quizAttempts.length)
+    const attempts = quizAttempts || [];
+    const avgScore = attempts.length > 0
+      ? Math.round(attempts.reduce((a: number, b: any) => a + b.score, 0) / attempts.length)
       : 0;
-    const passRate = quizAttempts.length > 0
-      ? Math.round((quizAttempts.filter((a) => a.passed).length / quizAttempts.length) * 100)
+    const passRate = attempts.length > 0
+      ? Math.round((attempts.filter((a: any) => a.passed).length / attempts.length) * 100)
       : 0;
 
     return NextResponse.json({
-      totalUsers,
-      activeUsers,
-      totalModules,
-      totalAssignments,
-      totalCompletions: completions,
-      completionRate: totalAssignments > 0 ? Math.round((completions / totalAssignments) * 100) : 0,
+      totalUsers: totalUsers || 0,
+      activeUsers: activeUsers || 0,
+      totalModules: totalModules || 0,
+      totalAssignments: totalAssignments || 0,
+      totalCompletions: completions || 0,
+      completionRate: (totalAssignments || 0) > 0 ? Math.round(((completions || 0) / (totalAssignments || 0)) * 100) : 0,
       avgQuizScore: avgScore,
       quizPassRate: passRate,
     });
   }
 
   if (type === "employees") {
-    const users = await db.user.findMany({
-      where: { isActive: true },
-      select: {
-        id: true, firstName: true, lastName: true, role: true, location: true,
-        _count: { select: { assignments: true, completions: true } },
-      },
-    });
+    const { data: users } = await db
+      .from("User")
+      .select("id, firstName, lastName, role, location")
+      .eq("isActive", true);
 
-    const report = users.map((u) => ({
-      id: u.id,
-      name: `${u.firstName} ${u.lastName}`,
-      role: u.role,
-      location: u.location,
-      assigned: u._count.assignments,
-      completed: u._count.completions,
-      completionRate: u._count.assignments > 0
-        ? Math.round((u._count.completions / u._count.assignments) * 100)
-        : 0,
-    }));
+    const report = await Promise.all(
+      (users || []).map(async (u: any) => {
+        const [{ count: assignmentCount }, { count: completionCount }] = await Promise.all([
+          db.from("ModuleAssignment").select("*", { count: "exact", head: true }).eq("userId", u.id),
+          db.from("ModuleCompletion").select("*", { count: "exact", head: true }).eq("userId", u.id),
+        ]);
+        const assigned = assignmentCount || 0;
+        const completed = completionCount || 0;
+        return {
+          id: u.id,
+          name: `${u.firstName} ${u.lastName}`,
+          role: u.role,
+          location: u.location,
+          assigned,
+          completed,
+          completionRate: assigned > 0 ? Math.round((completed / assigned) * 100) : 0,
+        };
+      })
+    );
 
     return NextResponse.json(report);
   }
 
   if (type === "overdue") {
-    const overdue = await db.moduleAssignment.findMany({
-      where: {
-        dueDate: { lt: new Date() },
-        status: { not: "COMPLETED" },
-      },
-      include: {
-        user: { select: { firstName: true, lastName: true, role: true } },
-        module: { select: { title: true } },
-      },
-    });
+    const { data: overdue } = await db
+      .from("ModuleAssignment")
+      .select("*, user:User(firstName, lastName, role), module:Module(title)")
+      .lt("dueDate", new Date().toISOString())
+      .neq("status", "COMPLETED");
 
-    return NextResponse.json(overdue);
+    return NextResponse.json(overdue || []);
   }
 
   return NextResponse.json({ error: "Invalid report type" }, { status: 400 });

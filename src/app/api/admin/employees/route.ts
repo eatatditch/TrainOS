@@ -12,33 +12,34 @@ export async function GET(request: NextRequest) {
   const role = request.nextUrl.searchParams.get("role");
   const location = request.nextUrl.searchParams.get("location");
 
-  const users = await db.user.findMany({
-    where: {
-      ...(role ? { role: role as any } : {}),
-      ...(location ? { location } : {}),
-    },
-    select: {
-      id: true,
-      email: true,
-      firstName: true,
-      lastName: true,
-      role: true,
-      location: true,
-      phone: true,
-      hireDate: true,
-      isActive: true,
-      createdAt: true,
-      _count: {
-        select: {
-          completions: true,
-          assignments: true,
-        },
-      },
-    },
-    orderBy: { lastName: "asc" },
-  });
+  let query = db
+    .from("User")
+    .select("id, email, firstName, lastName, role, location, phone, hireDate, isActive, createdAt")
+    .order("lastName");
 
-  return NextResponse.json(users);
+  if (role) query = query.eq("role", role);
+  if (location) query = query.eq("location", location);
+
+  const { data: users } = await query;
+
+  // Fetch counts separately for assignments and completions
+  const usersWithCounts = await Promise.all(
+    (users || []).map(async (u: any) => {
+      const [{ count: assignmentCount }, { count: completionCount }] = await Promise.all([
+        db.from("ModuleAssignment").select("*", { count: "exact", head: true }).eq("userId", u.id),
+        db.from("ModuleCompletion").select("*", { count: "exact", head: true }).eq("userId", u.id),
+      ]);
+      return {
+        ...u,
+        _count: {
+          assignments: assignmentCount || 0,
+          completions: completionCount || 0,
+        },
+      };
+    })
+  );
+
+  return NextResponse.json(usersWithCounts);
 }
 
 export async function POST(request: NextRequest) {
@@ -49,7 +50,12 @@ export async function POST(request: NextRequest) {
 
   const data = await request.json();
 
-  const existing = await db.user.findUnique({ where: { email: data.email } });
+  const { data: existing } = await db
+    .from("User")
+    .select("*")
+    .eq("email", data.email)
+    .single();
+
   if (existing) {
     return NextResponse.json({ error: "Email already exists" }, { status: 400 });
   }
@@ -65,8 +71,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: authError.message }, { status: 400 });
   }
 
-  const newUser = await db.user.create({
-    data: {
+  const { data: newUser, error } = await db
+    .from("User")
+    .insert({
       authId: authData.user.id,
       email: data.email,
       firstName: data.firstName,
@@ -74,10 +81,12 @@ export async function POST(request: NextRequest) {
       role: data.role || "EMPLOYEE",
       location: data.location || "",
       phone: data.phone || "",
-      hireDate: data.hireDate ? new Date(data.hireDate) : new Date(),
+      hireDate: data.hireDate ? new Date(data.hireDate).toISOString() : new Date().toISOString(),
       isActive: true,
-    },
-  });
+    })
+    .select()
+    .single();
 
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ id: newUser.id, email: newUser.email, firstName: newUser.firstName, lastName: newUser.lastName });
 }

@@ -24,42 +24,28 @@ export default async function DashboardPage() {
   const userId = user.id;
   const firstName = user.firstName;
 
-  const [assignments, completions, quizAttempts, announcements, recentModules] = await Promise.all([
-    db.moduleAssignment.findMany({
-      where: { userId },
-      include: { module: { include: { section: true, quiz: true } } },
-      orderBy: { dueDate: "asc" },
-    }),
-    db.moduleCompletion.findMany({
-      where: { userId },
-    }),
-    db.quizAttempt.findMany({
-      where: { userId },
-      include: { quiz: { include: { module: true } } },
-      orderBy: { completedAt: "desc" },
-      take: 5,
-    }),
-    db.announcement.findMany({
-      where: { isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }] },
-      orderBy: { createdAt: "desc" },
-      take: 5,
-    }),
-    db.module.findMany({
-      where: { isActive: true },
-      include: { section: true },
-      orderBy: { createdAt: "desc" },
-      take: 6,
-    }),
+  const [assignmentsResult, completionsResult, quizAttemptsResult, announcementsResult, recentModulesResult] = await Promise.all([
+    db.from("ModuleAssignment").select("*, module:Module(*, section:Section(*), quiz:Quiz(*))").eq("userId", userId).order("dueDate"),
+    db.from("ModuleCompletion").select("*").eq("userId", userId),
+    db.from("QuizAttempt").select("*, quiz:Quiz(*, module:Module(*))").eq("userId", userId).order("completedAt", { ascending: false }).limit(5),
+    db.from("Announcement").select("*").eq("isActive", true).or("expiresAt.is.null,expiresAt.gte." + new Date().toISOString()).order("createdAt", { ascending: false }).limit(5),
+    db.from("Module").select("*, section:Section(*)").eq("isActive", true).order("createdAt", { ascending: false }).limit(6),
   ]);
 
-  const completedIds = new Set(completions.map((c) => c.moduleId));
+  const assignments = assignmentsResult.data || [];
+  const completions = completionsResult.data || [];
+  const quizAttempts = quizAttemptsResult.data || [];
+  const announcements = announcementsResult.data || [];
+  const recentModules = recentModulesResult.data || [];
+
+  const completedIds = new Set(completions.map((c: any) => c.moduleId));
   const totalAssigned = assignments.length;
-  const completedAssigned = assignments.filter((a) => completedIds.has(a.moduleId)).length;
+  const completedAssigned = assignments.filter((a: any) => completedIds.has(a.moduleId)).length;
   const overdue = assignments.filter(
-    (a) => a.dueDate && new Date(a.dueDate) < new Date() && !completedIds.has(a.moduleId)
+    (a: any) => a.dueDate && new Date(a.dueDate) < new Date() && !completedIds.has(a.moduleId)
   );
-  const incomplete = assignments.filter((a) => !completedIds.has(a.moduleId));
-  const required = assignments.filter((a) => a.isRequired && !completedIds.has(a.moduleId));
+  const incomplete = assignments.filter((a: any) => !completedIds.has(a.moduleId));
+  const required = assignments.filter((a: any) => a.isRequired && !completedIds.has(a.moduleId));
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
@@ -103,7 +89,7 @@ export default async function DashboardPage() {
             Announcements
           </h2>
           <div className="space-y-2">
-            {announcements.map((ann) => (
+            {announcements.map((ann: any) => (
               <div
                 key={ann.id}
                 className={`rounded-lg p-4 border-l-4 ${
@@ -142,7 +128,7 @@ export default async function DashboardPage() {
             </div>
             <CardContent>
               <div className="space-y-3">
-                {required.slice(0, 5).map((a) => (
+                {required.slice(0, 5).map((a: any) => (
                   <Link
                     key={a.id}
                     href={`/training/${a.module.section?.slug}/${a.module.slug}`}
@@ -172,7 +158,7 @@ export default async function DashboardPage() {
             </div>
             <CardContent>
               <div className="space-y-3">
-                {overdue.slice(0, 5).map((a) => (
+                {overdue.slice(0, 5).map((a: any) => (
                   <Link
                     key={a.id}
                     href={`/training/${a.module.section?.slug}/${a.module.slug}`}
@@ -207,7 +193,7 @@ export default async function DashboardPage() {
               {incomplete.length === 0 ? (
                 <p className="text-sm text-gray-500 py-4 text-center">All caught up! Nice work.</p>
               ) : (
-                incomplete.slice(0, 5).map((a) => (
+                incomplete.slice(0, 5).map((a: any) => (
                   <Link
                     key={a.id}
                     href={`/training/${a.module.section?.slug}/${a.module.slug}`}
@@ -241,7 +227,7 @@ export default async function DashboardPage() {
               {quizAttempts.length === 0 ? (
                 <p className="text-sm text-gray-500 py-4 text-center">No quizzes taken yet.</p>
               ) : (
-                quizAttempts.map((attempt) => (
+                quizAttempts.map((attempt: any) => (
                   <div key={attempt.id} className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{attempt.quiz.title}</p>
@@ -272,7 +258,7 @@ export default async function DashboardPage() {
           </Link>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {recentModules.map((mod) => (
+          {recentModules.map((mod: any) => (
             <Link key={mod.id} href={`/training/${mod.section?.slug}/${mod.slug}`}>
               <Card hover>
                 <div className="flex items-start justify-between">

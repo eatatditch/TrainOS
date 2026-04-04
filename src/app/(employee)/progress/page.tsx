@@ -15,42 +15,27 @@ export default async function ProgressPage() {
 
   const userId = user.id;
 
-  const [assignments, completions, quizAttempts, paths] = await Promise.all([
-    db.moduleAssignment.findMany({
-      where: { userId },
-      include: { module: { include: { section: true } } },
-      orderBy: { dueDate: "asc" },
-    }),
-    db.moduleCompletion.findMany({
-      where: { userId },
-      include: { module: { include: { section: true } } },
-      orderBy: { completedAt: "desc" },
-    }),
-    db.quizAttempt.findMany({
-      where: { userId },
-      include: { quiz: true },
-    }),
-    db.userTrainingPath.findMany({
-      where: { userId },
-      include: {
-        trainingPath: {
-          include: {
-            modules: { include: { module: true } },
-          },
-        },
-      },
-    }),
+  const [assignmentsResult, completionsResult, quizAttemptsResult, pathsResult] = await Promise.all([
+    db.from("ModuleAssignment").select("*, module:Module(*, section:Section(*))").eq("userId", userId).order("dueDate"),
+    db.from("ModuleCompletion").select("*, module:Module(*, section:Section(*))").eq("userId", userId).order("completedAt", { ascending: false }),
+    db.from("QuizAttempt").select("*, quiz:Quiz(*)").eq("userId", userId),
+    db.from("UserTrainingPath").select("*, trainingPath:TrainingPath(*, modules:TrainingPathModule(*, module:Module(*)))").eq("userId", userId),
   ]);
 
-  const completedIds = new Set(completions.map((c) => c.moduleId));
+  const assignments = assignmentsResult.data || [];
+  const completions = completionsResult.data || [];
+  const quizAttempts = quizAttemptsResult.data || [];
+  const paths = pathsResult.data || [];
+
+  const completedIds = new Set(completions.map((c: any) => c.moduleId));
   const totalAssigned = assignments.length;
-  const completedCount = assignments.filter((a) => completedIds.has(a.moduleId)).length;
+  const completedCount = assignments.filter((a: any) => completedIds.has(a.moduleId)).length;
   const overdueCount = assignments.filter(
-    (a) => a.dueDate && new Date(a.dueDate) < new Date() && !completedIds.has(a.moduleId)
+    (a: any) => a.dueDate && new Date(a.dueDate) < new Date() && !completedIds.has(a.moduleId)
   ).length;
-  const quizzesPassed = new Set(quizAttempts.filter((a) => a.passed).map((a) => a.quizId)).size;
+  const quizzesPassed = new Set(quizAttempts.filter((a: any) => a.passed).map((a: any) => a.quizId)).size;
   const avgScore = quizAttempts.length > 0
-    ? Math.round(quizAttempts.reduce((acc, a) => acc + a.score, 0) / quizAttempts.length)
+    ? Math.round(quizAttempts.reduce((acc: number, a: any) => acc + a.score, 0) / quizAttempts.length)
     : 0;
 
   return (
@@ -79,9 +64,9 @@ export default async function ProgressPage() {
         <div>
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Training Paths</h2>
           <div className="space-y-3">
-            {paths.map((up) => {
-              const pathModules = up.trainingPath.modules;
-              const pathCompleted = pathModules.filter((pm) => completedIds.has(pm.moduleId)).length;
+            {paths.map((up: any) => {
+              const pathModules = up.trainingPath.modules || [];
+              const pathCompleted = pathModules.filter((pm: any) => completedIds.has(pm.moduleId)).length;
               return (
                 <Card key={up.id}>
                   <div className="flex items-center justify-between mb-3">
@@ -119,7 +104,7 @@ export default async function ProgressPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {assignments.map((a) => {
+                {assignments.map((a: any) => {
                   const isComplete = completedIds.has(a.moduleId);
                   const isOverdue = a.dueDate && new Date(a.dueDate) < new Date() && !isComplete;
                   return (
@@ -159,7 +144,7 @@ export default async function ProgressPage() {
         <div>
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Completion History</h2>
           <div className="space-y-2">
-            {completions.slice(0, 20).map((c) => (
+            {completions.slice(0, 20).map((c: any) => (
               <div key={c.id} className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-100">
                 <div className="flex items-center gap-3">
                   <CheckCircle2 className="w-5 h-5 text-ditch-green" />

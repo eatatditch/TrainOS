@@ -12,18 +12,22 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
   const data = await request.json();
 
-  const section = await db.section.update({
-    where: { id },
-    data: {
-      title: data.title,
-      description: data.description,
-      slug: data.title ? slugify(data.title) : undefined,
-      icon: data.icon,
-      sortOrder: data.sortOrder,
-      isActive: data.isActive,
-    },
-  });
+  const updateData: any = {};
+  if (data.title !== undefined) updateData.title = data.title;
+  if (data.description !== undefined) updateData.description = data.description;
+  if (data.title) updateData.slug = slugify(data.title);
+  if (data.icon !== undefined) updateData.icon = data.icon;
+  if (data.sortOrder !== undefined) updateData.sortOrder = data.sortOrder;
+  if (data.isActive !== undefined) updateData.isActive = data.isActive;
 
+  const { data: section, error } = await db
+    .from("Section")
+    .update(updateData)
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(section);
 }
 
@@ -34,6 +38,6 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   }
 
   const { id } = await params;
-  await db.section.delete({ where: { id } });
+  await db.from("Section").delete().eq("id", id);
   return NextResponse.json({ success: true });
 }

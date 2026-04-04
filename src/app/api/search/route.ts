@@ -15,21 +15,28 @@ export async function GET(request: NextRequest) {
 
   // Search modules
   if (type === "all" || type === "module") {
-    const modules = await db.module.findMany({
-      where: {
-        isActive: true,
-        OR: [
-          { title: { contains: query, mode: "insensitive" } },
-          { description: { contains: query, mode: "insensitive" } },
-          { content: { contains: query, mode: "insensitive" } },
-          { tags: { hasSome: searchTerms } },
-        ],
-      },
-      include: { section: true },
-      take: 20,
-    });
+    const { data: modules } = await db
+      .from("Module")
+      .select("*, section:Section(*)")
+      .eq("isActive", true)
+      .or(`title.ilike.%${query}%,description.ilike.%${query}%,content.ilike.%${query}%`)
+      .limit(20);
 
-    for (const mod of modules) {
+    // Also search by tags separately
+    const { data: tagModules } = await db
+      .from("Module")
+      .select("*, section:Section(*)")
+      .eq("isActive", true)
+      .overlaps("tags", searchTerms)
+      .limit(20);
+
+    const allModules = [...(modules || [])];
+    const moduleIds = new Set(allModules.map((m: any) => m.id));
+    for (const m of tagModules || []) {
+      if (!moduleIds.has(m.id)) allModules.push(m);
+    }
+
+    for (const mod of allModules) {
       results.push({
         id: mod.id,
         type: "module",
@@ -45,18 +52,14 @@ export async function GET(request: NextRequest) {
 
   // Search sections
   if (type === "all" || type === "section") {
-    const sections = await db.section.findMany({
-      where: {
-        isActive: true,
-        OR: [
-          { title: { contains: query, mode: "insensitive" } },
-          { description: { contains: query, mode: "insensitive" } },
-        ],
-      },
-      take: 10,
-    });
+    const { data: sections } = await db
+      .from("Section")
+      .select("*")
+      .eq("isActive", true)
+      .or(`title.ilike.%${query}%,description.ilike.%${query}%`)
+      .limit(10);
 
-    for (const sec of sections) {
+    for (const sec of sections || []) {
       results.push({
         id: sec.id,
         type: "section",
@@ -72,18 +75,13 @@ export async function GET(request: NextRequest) {
 
   // Search quizzes
   if (type === "all" || type === "quiz") {
-    const quizzes = await db.quiz.findMany({
-      where: {
-        OR: [
-          { title: { contains: query, mode: "insensitive" } },
-          { description: { contains: query, mode: "insensitive" } },
-        ],
-      },
-      include: { module: { include: { section: true } } },
-      take: 10,
-    });
+    const { data: quizzes } = await db
+      .from("Quiz")
+      .select("*, module:Module(*, section:Section(*))")
+      .or(`title.ilike.%${query}%,description.ilike.%${query}%`)
+      .limit(10);
 
-    for (const quiz of quizzes) {
+    for (const quiz of quizzes || []) {
       results.push({
         id: quiz.id,
         type: "quiz",
@@ -99,19 +97,26 @@ export async function GET(request: NextRequest) {
 
   // Search in SearchIndex table
   if (type === "all") {
-    const indexed = await db.searchIndex.findMany({
-      where: {
-        OR: [
-          { title: { contains: query, mode: "insensitive" } },
-          { content: { contains: query, mode: "insensitive" } },
-          { tags: { hasSome: searchTerms } },
-        ],
-      },
-      include: { module: { include: { section: true } }, section: true },
-      take: 10,
-    });
+    const { data: indexed } = await db
+      .from("SearchIndex")
+      .select("*, module:Module(*, section:Section(*)), section:Section(*)")
+      .or(`title.ilike.%${query}%,content.ilike.%${query}%`)
+      .limit(10);
 
-    for (const item of indexed) {
+    // Also search by tags in SearchIndex
+    const { data: tagIndexed } = await db
+      .from("SearchIndex")
+      .select("*, module:Module(*, section:Section(*)), section:Section(*)")
+      .overlaps("tags", searchTerms)
+      .limit(10);
+
+    const allIndexed = [...(indexed || [])];
+    const indexedIds = new Set(allIndexed.map((i: any) => i.id));
+    for (const item of tagIndexed || []) {
+      if (!indexedIds.has(item.id)) allIndexed.push(item);
+    }
+
+    for (const item of allIndexed) {
       const existingIds = new Set(results.map((r) => r.id));
       const id = item.moduleId || item.sectionId;
       if (id && !existingIds.has(id)) {

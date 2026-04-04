@@ -3,14 +3,29 @@ import { getUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 export async function GET() {
-  const paths = await db.trainingPath.findMany({
-    include: {
-      modules: { include: { module: true }, orderBy: { sortOrder: "asc" } },
-      _count: { select: { assignments: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-  return NextResponse.json(paths);
+  const { data: paths } = await db
+    .from("TrainingPath")
+    .select("*, modules:TrainingPathModule(*, module:Module(*))")
+    .order("createdAt", { ascending: false });
+
+  // Sort modules by sortOrder and add assignment counts
+  const pathsWithCounts = await Promise.all(
+    (paths || []).map(async (p: any) => {
+      if (p.modules) {
+        p.modules.sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+      }
+      const { count } = await db
+        .from("UserTrainingPath")
+        .select("*", { count: "exact", head: true })
+        .eq("trainingPathId", p.id);
+      return {
+        ...p,
+        _count: { assignments: count || 0 },
+      };
+    })
+  );
+
+  return NextResponse.json(pathsWithCounts);
 }
 
 export async function POST(request: NextRequest) {
@@ -21,22 +36,38 @@ export async function POST(request: NextRequest) {
 
   const data = await request.json();
 
-  const path = await db.trainingPath.create({
-    data: {
+  // Create the training path first
+  const { data: path, error: pathError } = await db
+    .from("TrainingPath")
+    .insert({
       title: data.title,
       description: data.description || "",
       targetRole: data.targetRole || "",
       isActive: true,
-      modules: {
-        create: (data.moduleIds || []).map((moduleId: string, i: number) => ({
+    })
+    .select()
+    .single();
+
+  if (pathError) return NextResponse.json({ error: pathError.message }, { status: 500 });
+
+  // Create path modules separately
+  if (data.moduleIds && data.moduleIds.length > 0) {
+    const { data: modules } = await db
+      .from("TrainingPathModule")
+      .insert(
+        data.moduleIds.map((moduleId: string, i: number) => ({
+          trainingPathId: path.id,
           moduleId,
           sortOrder: i,
           isRequired: true,
-        })),
-      },
-    },
-    include: { modules: true },
-  });
+        }))
+      )
+      .select();
+
+    path.modules = modules || [];
+  } else {
+    path.modules = [];
+  }
 
   return NextResponse.json(path);
 }

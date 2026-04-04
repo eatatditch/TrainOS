@@ -11,26 +11,30 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
   const data = await request.json();
 
-  const path = await db.trainingPath.update({
-    where: { id },
-    data: {
+  const { data: path, error } = await db
+    .from("TrainingPath")
+    .update({
       title: data.title,
       description: data.description,
       targetRole: data.targetRole,
       isActive: data.isActive,
-    },
-  });
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   if (data.moduleIds) {
-    await db.trainingPathModule.deleteMany({ where: { trainingPathId: id } });
-    await db.trainingPathModule.createMany({
-      data: data.moduleIds.map((moduleId: string, i: number) => ({
+    await db.from("TrainingPathModule").delete().eq("trainingPathId", id);
+    await db.from("TrainingPathModule").insert(
+      data.moduleIds.map((moduleId: string, i: number) => ({
         trainingPathId: id,
         moduleId,
         sortOrder: i,
         isRequired: true,
-      })),
-    });
+      }))
+    );
   }
 
   return NextResponse.json(path);
@@ -43,6 +47,6 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   }
 
   const { id } = await params;
-  await db.trainingPath.delete({ where: { id } });
+  await db.from("TrainingPath").delete().eq("id", id);
   return NextResponse.json({ success: true });
 }

@@ -17,32 +17,56 @@ export default async function ModuleDetailPage({
   const user = await getUser();
   const userId = user?.id;
 
-  const module = await db.module.findFirst({
-    where: { slug: moduleSlug, section: { slug: sectionSlug }, isActive: true },
-    include: {
-      section: true,
-      assets: { orderBy: { sortOrder: "asc" } },
-      quiz: { include: { questions: true } },
-    },
-  });
+  // Fetch the section first to get its ID for filtering
+  const { data: sectionData } = await db
+    .from("Section")
+    .select("id, slug")
+    .eq("slug", sectionSlug)
+    .single();
 
-  if (!module) notFound();
+  if (!sectionData) notFound();
 
-  const isCompleted = userId
-    ? !!(await db.moduleCompletion.findFirst({ where: { userId, moduleId: module.id } }))
-    : false;
+  const { data: moduleData } = await db
+    .from("Module")
+    .select("*, section:Section(*), assets:ModuleAsset(*), quiz:Quiz(*, questions:QuizQuestion(*))")
+    .eq("slug", moduleSlug)
+    .eq("sectionId", sectionData.id)
+    .eq("isActive", true)
+    .single();
 
-  const quizAttempts = userId && module.quiz
-    ? await db.quizAttempt.findMany({
-        where: { userId, quizId: module.quiz.id },
-        orderBy: { completedAt: "desc" },
-      })
-    : [];
+  if (!moduleData) notFound();
 
-  const videos = module.assets.filter((a) => a.fileType === "VIDEO");
-  const documents = module.assets.filter((a) => ["PDF", "DOCUMENT", "CHECKLIST"].includes(a.fileType));
-  const images = module.assets.filter((a) => a.fileType === "IMAGE");
-  const printables = module.assets.filter((a) => a.isPrintable);
+  const module = {
+    ...moduleData,
+    assets: (moduleData.assets || []).sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
+  };
+
+  let isCompleted = false;
+  if (userId) {
+    const { data: completionData } = await db
+      .from("ModuleCompletion")
+      .select("id")
+      .eq("userId", userId)
+      .eq("moduleId", module.id)
+      .limit(1);
+    isCompleted = (completionData || []).length > 0;
+  }
+
+  let quizAttempts: any[] = [];
+  if (userId && module.quiz) {
+    const { data: attemptsData } = await db
+      .from("QuizAttempt")
+      .select("*")
+      .eq("userId", userId)
+      .eq("quizId", module.quiz.id)
+      .order("completedAt", { ascending: false });
+    quizAttempts = attemptsData || [];
+  }
+
+  const videos = module.assets.filter((a: any) => a.fileType === "VIDEO");
+  const documents = module.assets.filter((a: any) => ["PDF", "DOCUMENT", "CHECKLIST"].includes(a.fileType));
+  const images = module.assets.filter((a: any) => a.fileType === "IMAGE");
+  const printables = module.assets.filter((a: any) => a.isPrintable);
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -72,7 +96,7 @@ export default async function ModuleDetailPage({
             <Clock className="w-4 h-4" /> {formatDuration(module.estimatedMinutes)}
           </span>
         )}
-        {module.tags.length > 0 && module.tags.map((tag) => (
+        {module.tags.length > 0 && module.tags.map((tag: string) => (
           <Badge key={tag}>{tag}</Badge>
         ))}
       </div>
@@ -101,7 +125,7 @@ export default async function ModuleDetailPage({
             <Video className="w-5 h-5 text-ditch-orange" /> Training Videos
           </h2>
           <div className="space-y-4">
-            {videos.map((video) => (
+            {videos.map((video: any) => (
               <div key={video.id} className="bg-gray-900 rounded-xl aspect-video flex items-center justify-center">
                 <div className="text-center text-white">
                   <Video className="w-12 h-12 mx-auto mb-2 opacity-50" />
@@ -123,7 +147,7 @@ export default async function ModuleDetailPage({
             <ImageIcon className="w-5 h-5 text-ditch-orange" /> Photos & Images
           </h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {images.map((img) => (
+            {images.map((img: any) => (
               <div key={img.id} className="aspect-square bg-gray-100 rounded-lg flex items-center justify-center overflow-hidden">
                 <div className="text-center p-4">
                   <ImageIcon className="w-8 h-8 text-gray-400 mx-auto mb-1" />
@@ -142,7 +166,7 @@ export default async function ModuleDetailPage({
             <FileText className="w-5 h-5 text-ditch-orange" /> Documents & Files
           </h2>
           <div className="space-y-2">
-            {documents.map((doc) => (
+            {documents.map((doc: any) => (
               <div key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                 <div className="flex items-center gap-3">
                   <FileText className="w-5 h-5 text-ditch-navy" />
@@ -177,7 +201,7 @@ export default async function ModuleDetailPage({
               </h2>
               <p className="text-sm text-gray-500 mt-1">{module.quiz.description}</p>
               <div className="flex items-center gap-4 mt-3 text-sm text-gray-500">
-                <span>{module.quiz.questions.length} questions</span>
+                <span>{(module.quiz.questions || []).length} questions</span>
                 <span>Passing: {module.quiz.passingScore}%</span>
                 {module.quiz.retryLimit > 0 && <span>Max attempts: {module.quiz.retryLimit}</span>}
               </div>
@@ -187,7 +211,7 @@ export default async function ModuleDetailPage({
             <div className="mt-4 pt-4 border-t border-gray-100">
               <p className="text-sm font-medium text-gray-700 mb-2">Your Attempts ({quizAttempts.length})</p>
               <div className="space-y-2">
-                {quizAttempts.slice(0, 3).map((attempt) => (
+                {quizAttempts.slice(0, 3).map((attempt: any) => (
                   <div key={attempt.id} className="flex items-center justify-between text-sm">
                     <span className="text-gray-500">{attempt.completedAt ? formatDate(attempt.completedAt) : "In progress"}</span>
                     <div className="flex items-center gap-2">
@@ -226,7 +250,7 @@ export default async function ModuleDetailPage({
             <Printer className="w-5 h-5 text-ditch-orange" /> Printable Materials
           </h2>
           <div className="space-y-2">
-            {printables.map((doc) => (
+            {printables.map((doc: any) => (
               <a
                 key={doc.id}
                 href={`/print/${doc.id}`}

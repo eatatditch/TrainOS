@@ -12,22 +12,26 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const data = await request.json();
 
   // Update quiz metadata
-  const quiz = await db.quiz.update({
-    where: { id },
-    data: {
+  const { data: quiz, error } = await db
+    .from("Quiz")
+    .update({
       title: data.title,
       description: data.description,
       passingScore: data.passingScore,
       retryLimit: data.retryLimit,
       isRequired: data.isRequired,
-    },
-  });
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   // If questions provided, replace them
   if (data.questions) {
-    await db.quizQuestion.deleteMany({ where: { quizId: id } });
-    await db.quizQuestion.createMany({
-      data: data.questions.map((q: any, i: number) => ({
+    await db.from("QuizQuestion").delete().eq("quizId", id);
+    await db.from("QuizQuestion").insert(
+      data.questions.map((q: any, i: number) => ({
         quizId: id,
         questionText: q.questionText,
         questionType: q.questionType,
@@ -35,8 +39,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         correctAnswer: q.correctAnswer,
         explanation: q.explanation || "",
         sortOrder: i,
-      })),
-    });
+      }))
+    );
   }
 
   return NextResponse.json(quiz);
@@ -49,6 +53,6 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   }
 
   const { id } = await params;
-  await db.quiz.delete({ where: { id } });
+  await db.from("Quiz").delete().eq("id", id);
   return NextResponse.json({ success: true });
 }

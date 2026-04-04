@@ -8,19 +8,22 @@ export async function POST(request: NextRequest) {
 
   const { quizId, answers } = await request.json();
 
-  const quiz = await db.quiz.findUnique({
-    where: { id: quizId },
-    include: { questions: true },
-  });
+  const { data: quiz } = await db
+    .from("Quiz")
+    .select("*, questions:QuizQuestion(*)")
+    .eq("id", quizId)
+    .single();
 
   if (!quiz) return NextResponse.json({ error: "Quiz not found" }, { status: 404 });
 
   // Check retry limit
   if (quiz.retryLimit > 0) {
-    const attemptCount = await db.quizAttempt.count({
-      where: { userId: user.id, quizId },
-    });
-    if (attemptCount >= quiz.retryLimit) {
+    const { count: attemptCount } = await db
+      .from("QuizAttempt")
+      .select("*", { count: "exact", head: true })
+      .eq("userId", user.id)
+      .eq("quizId", quizId);
+    if ((attemptCount || 0) >= quiz.retryLimit) {
       return NextResponse.json({ error: "Max attempts reached" }, { status: 400 });
     }
   }
@@ -48,17 +51,19 @@ export async function POST(request: NextRequest) {
   const score = Math.round((correctCount / quiz.questions.length) * 100);
   const passed = score >= quiz.passingScore;
 
-  const attempt = await db.quizAttempt.create({
-    data: {
+  const { data: attempt } = await db
+    .from("QuizAttempt")
+    .insert({
       quizId,
       userId: user.id,
       score,
       passed,
       answers: answers as any,
-      startedAt: new Date(),
-      completedAt: new Date(),
-    },
-  });
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+    })
+    .select()
+    .single();
 
-  return NextResponse.json({ score, passed, feedback, attemptId: attempt.id });
+  return NextResponse.json({ score, passed, feedback, attemptId: attempt?.id });
 }

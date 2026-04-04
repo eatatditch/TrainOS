@@ -13,30 +13,33 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
   const user = await getUser();
   const userId = user?.id;
 
-  const section = await db.section.findFirst({
-    where: { slug: sectionSlug, isActive: true },
-    include: {
-      modules: {
-        where: { isActive: true },
-        include: {
-          assets: true,
-          quiz: true,
-        },
-        orderBy: { sortOrder: "asc" },
-      },
-    },
-  });
+  const { data: sectionData } = await db
+    .from("Section")
+    .select("*, modules:Module(*, assets:ModuleAsset(*), quiz:Quiz(*))")
+    .eq("slug", sectionSlug)
+    .eq("isActive", true)
+    .single();
 
-  if (!section) notFound();
+  if (!sectionData) notFound();
+
+  const section = {
+    ...sectionData,
+    modules: (sectionData.modules || [])
+      .filter((m: any) => m.isActive)
+      .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
+  };
 
   const completions = userId
-    ? await db.moduleCompletion.findMany({
-        where: { userId, moduleId: { in: section.modules.map((m) => m.id) } },
-      })
+    ? await (async () => {
+        const moduleIds = section.modules.map((m: any) => m.id);
+        if (moduleIds.length === 0) return [];
+        const { data } = await db.from("ModuleCompletion").select("*").eq("userId", userId).in("moduleId", moduleIds);
+        return data || [];
+      })()
     : [];
 
-  const completedIds = new Set(completions.map((c) => c.moduleId));
-  const completedCount = section.modules.filter((m) => completedIds.has(m.id)).length;
+  const completedIds = new Set(completions.map((c: any) => c.moduleId));
+  const completedCount = section.modules.filter((m: any) => completedIds.has(m.id)).length;
 
   return (
     <div className="space-y-6">
@@ -61,11 +64,11 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
       )}
 
       <div className="space-y-3">
-        {section.modules.map((mod, index) => {
+        {section.modules.map((mod: any, index: number) => {
           const isCompleted = completedIds.has(mod.id);
-          const hasVideo = mod.assets.some((a) => a.fileType === "VIDEO");
-          const hasPDF = mod.assets.some((a) => a.fileType === "PDF" || a.fileType === "DOCUMENT" || a.fileType === "CHECKLIST");
-          const hasImages = mod.assets.some((a) => a.fileType === "IMAGE");
+          const hasVideo = (mod.assets || []).some((a: any) => a.fileType === "VIDEO");
+          const hasPDF = (mod.assets || []).some((a: any) => a.fileType === "PDF" || a.fileType === "DOCUMENT" || a.fileType === "CHECKLIST");
+          const hasImages = (mod.assets || []).some((a: any) => a.fileType === "IMAGE");
 
           return (
             <Link key={mod.id} href={`/training/${sectionSlug}/${mod.slug}`}>

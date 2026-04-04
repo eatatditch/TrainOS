@@ -14,33 +14,43 @@ export default async function QuizzesPage() {
 
   const userId = user.id;
 
-  const [assignedQuizzes, attempts] = await Promise.all([
-    db.quiz.findMany({
-      where: {
-        module: {
-          assignments: { some: { userId } },
-          isActive: true,
-        },
-      },
-      include: {
-        module: { include: { section: true } },
-        attempts: { where: { userId }, orderBy: { completedAt: "desc" } },
-      },
-    }),
-    db.quizAttempt.findMany({
-      where: { userId },
-      include: { quiz: { include: { module: { include: { section: true } } } } },
-      orderBy: { completedAt: "desc" },
-    }),
-  ]);
+  // Fetch all quizzes with their module, section, questions, and user's attempts
+  const { data: allQuizzesData } = await db
+    .from("Quiz")
+    .select("*, module:Module(*, section:Section(*)), questions:QuizQuestion(*)");
 
-  const allQuizzes = await db.quiz.findMany({
-    include: {
-      module: { include: { section: true } },
-      attempts: { where: { userId }, orderBy: { completedAt: "desc" } },
-      questions: true,
-    },
-  });
+  const allQuizzesRaw = allQuizzesData || [];
+
+  // Fetch all attempts for this user
+  const { data: attemptsData } = await db
+    .from("QuizAttempt")
+    .select("*, quiz:Quiz(*, module:Module(*, section:Section(*)))")
+    .eq("userId", userId)
+    .order("completedAt", { ascending: false });
+
+  const attempts = attemptsData || [];
+
+  // Fetch user's attempts grouped by quizId for the quiz cards
+  const { data: userAttemptsData } = await db
+    .from("QuizAttempt")
+    .select("*")
+    .eq("userId", userId)
+    .order("completedAt", { ascending: false });
+
+  const userAttempts = userAttemptsData || [];
+
+  // Group attempts by quizId
+  const attemptsByQuiz: Record<string, any[]> = {};
+  for (const a of userAttempts) {
+    if (!attemptsByQuiz[a.quizId]) attemptsByQuiz[a.quizId] = [];
+    attemptsByQuiz[a.quizId].push(a);
+  }
+
+  // Attach attempts to each quiz
+  const allQuizzes = allQuizzesRaw.map((quiz: any) => ({
+    ...quiz,
+    attempts: attemptsByQuiz[quiz.id] || [],
+  }));
 
   return (
     <div className="space-y-6">
@@ -57,12 +67,12 @@ export default async function QuizzesPage() {
         />
       ) : (
         <div className="space-y-4">
-          {allQuizzes.map((quiz) => {
+          {allQuizzes.map((quiz: any) => {
             const lastAttempt = quiz.attempts[0];
             const bestScore = quiz.attempts.length > 0
-              ? Math.max(...quiz.attempts.map((a) => a.score))
+              ? Math.max(...quiz.attempts.map((a: any) => a.score))
               : null;
-            const hasPassed = quiz.attempts.some((a) => a.passed);
+            const hasPassed = quiz.attempts.some((a: any) => a.passed);
             const canRetry = quiz.retryLimit === 0 || quiz.attempts.length < quiz.retryLimit;
 
             return (
@@ -82,7 +92,7 @@ export default async function QuizzesPage() {
                     {quiz.module?.section?.title} · {quiz.module?.title}
                   </p>
                   <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
-                    <span>{quiz.questions.length} questions</span>
+                    <span>{(quiz.questions || []).length} questions</span>
                     <span>Pass: {quiz.passingScore}%</span>
                     <span>{quiz.attempts.length} attempt{quiz.attempts.length !== 1 ? "s" : ""}</span>
                     {bestScore !== null && <span>Best: {bestScore}%</span>}
@@ -124,7 +134,7 @@ export default async function QuizzesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {attempts.map((attempt) => (
+                  {attempts.map((attempt: any) => (
                     <tr key={attempt.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium text-gray-900">{attempt.quiz.title}</td>
                       <td className="px-4 py-3 text-gray-500">{attempt.quiz.module?.title}</td>
