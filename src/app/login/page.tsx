@@ -28,8 +28,8 @@ export default function LoginPage() {
       setError("Invalid email or password");
       setLoading(false);
     } else {
-      router.push("/dashboard");
-      router.refresh();
+      // Use full page navigation to ensure auth cookies are sent
+      window.location.href = "/dashboard";
     }
   };
 
