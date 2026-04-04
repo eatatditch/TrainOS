@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ditch-orange: #cd6028;
+  --color-ditch-green: #547352;
+  --color-ditch-navy: #325269;
+  --color-ditch-white: #ffffff;
+  --color-ditch-black: #000000;
+  --font-sans: "Inter", system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900 antialiased;
+  }
+
+  @media print {
+    body {
+      @apply bg-white text-black;
+    }
+    .no-print {
+      display: none !important;
+    }
+    .print-only {
+      display: block !important;
+    }
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-ditch-orange text-white px-6 py-2.5 rounded-lg font-medium hover:bg-ditch-orange/90 transition-colors focus:outline-none focus:ring-2 focus:ring-ditch-orange/50;
+  }
+  .btn-secondary {
+    @apply bg-ditch-navy text-white px-6 py-2.5 rounded-lg font-medium hover:bg-ditch-navy/90 transition-colors focus:outline-none focus:ring-2 focus:ring-ditch-navy/50;
+  }
+  .btn-outline {
+    @apply border-2 border-ditch-navy text-ditch-navy px-6 py-2.5 rounded-lg font-medium hover:bg-ditch-navy hover:text-white transition-colors;
+  }
+  .card {
+    @apply bg-white rounded-xl shadow-sm border border-gray-100 p-6;
+  }
+  .card-hover {
+    @apply card hover:shadow-md hover:border-gray-200 transition-all cursor-pointer;
+  }
+  .badge-required {
+    @apply bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  .badge-optional {
+    @apply bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  .badge-completed {
+    @apply bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  .badge-overdue {
+    @apply bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  .sidebar-link {
+    @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors;
+  }
+  .sidebar-link-active {
+    @apply sidebar-link bg-ditch-orange/10 text-ditch-orange hover:bg-ditch-orange/10 hover:text-ditch-orange;
+  }
+}
