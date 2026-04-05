@@ -24,19 +24,43 @@ export default async function DashboardPage() {
   const userId = user.id;
   const firstName = user.firstName;
 
-  const [assignmentsResult, completionsResult, quizAttemptsResult, announcementsResult, recentModulesResult] = await Promise.all([
-    db.from("ModuleAssignment").select("*, module:Module(*, section:Section(*), quiz:Quiz(*))").eq("userId", userId).order("dueDate"),
+  // Fetch user's assigned training path modules first
+  const { data: userPaths } = await db
+    .from("UserTrainingPath")
+    .select("trainingPath:TrainingPath(modules:TrainingPathModule(moduleId))")
+    .eq("userId", userId);
+
+  const assignedModuleIds: string[] = [];
+  (userPaths || []).forEach((up: any) => {
+    (up.trainingPath?.modules || []).forEach((tpm: any) => {
+      if (tpm.moduleId) assignedModuleIds.push(tpm.moduleId);
+    });
+  });
+
+  const [assignmentsResult, completionsResult, quizAttemptsResult, announcementsResult] = await Promise.all([
+    db.from("ModuleAssignment").select("*, module:Module(*, section:Section(*))").eq("userId", userId).order("dueDate"),
     db.from("ModuleCompletion").select("*").eq("userId", userId),
     db.from("QuizAttempt").select("*, quiz:Quiz(*, module:Module(*))").eq("userId", userId).order("completedAt", { ascending: false }).limit(5),
     db.from("Announcement").select("*").eq("isActive", true).or("expiresAt.is.null,expiresAt.gte." + new Date().toISOString()).order("createdAt", { ascending: false }).limit(5),
-    db.from("Module").select("*, section:Section(*)").eq("isActive", true).order("createdAt", { ascending: false }).limit(6),
   ]);
+
+  // Fetch only assigned modules for the "Recent" section
+  let recentModules: any[] = [];
+  if (assignedModuleIds.length > 0) {
+    const { data } = await db
+      .from("Module")
+      .select("*, section:Section(*)")
+      .eq("isActive", true)
+      .in("id", assignedModuleIds)
+      .order("createdAt", { ascending: false })
+      .limit(6);
+    recentModules = data || [];
+  }
 
   const assignments = assignmentsResult.data || [];
   const completions = completionsResult.data || [];
   const quizAttempts = quizAttemptsResult.data || [];
   const announcements = announcementsResult.data || [];
-  const recentModules = recentModulesResult.data || [];
 
   const completedIds = new Set(completions.map((c: any) => c.moduleId));
   const totalAssigned = assignments.length;

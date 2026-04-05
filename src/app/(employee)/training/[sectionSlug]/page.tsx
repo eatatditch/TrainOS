@@ -13,7 +13,9 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
   const user = await getUser();
   const userId = user?.id;
 
-  // Fetch section with modules (no quiz on module anymore)
+  const isAdmin = user ? ["SUPER_ADMIN", "ADMIN", "MANAGER"].includes(user.role) : false;
+
+  // Fetch section with modules
   const { data: sectionData } = await db
     .from("Section")
     .select("*, modules:Module(*, assets:ModuleAsset(*))")
@@ -22,6 +24,28 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
     .single();
 
   if (!sectionData) notFound();
+
+  // Check if employee is assigned to any training path that includes modules in this section
+  if (userId && !isAdmin) {
+    const { data: userPaths } = await db
+      .from("UserTrainingPath")
+      .select("trainingPath:TrainingPath(modules:TrainingPathModule(moduleId))")
+      .eq("userId", userId);
+
+    const assignedModuleIds = new Set<string>();
+    (userPaths || []).forEach((up: any) => {
+      (up.trainingPath?.modules || []).forEach((tpm: any) => {
+        if (tpm.moduleId) assignedModuleIds.add(tpm.moduleId);
+      });
+    });
+
+    const sectionModuleIds = (sectionData.modules || []).map((m: any) => m.id);
+    const hasAssignedModule = sectionModuleIds.some((id: string) => assignedModuleIds.has(id));
+
+    if (!hasAssignedModule) {
+      redirect("/training");
+    }
+  }
 
   // Enforce sequential section order — check if previous section is complete
   if (userId) {

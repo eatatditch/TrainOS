@@ -37,6 +37,27 @@ export default async function ModuleDetailPage({
 
   if (!moduleData) notFound();
 
+  const isAdmin = user ? ["SUPER_ADMIN", "ADMIN", "MANAGER"].includes(user.role) : false;
+
+  // Check if employee is assigned to this module via a training path
+  if (userId && !isAdmin) {
+    const { data: userPaths } = await db
+      .from("UserTrainingPath")
+      .select("trainingPath:TrainingPath(modules:TrainingPathModule(moduleId))")
+      .eq("userId", userId);
+
+    const assignedModuleIds = new Set<string>();
+    (userPaths || []).forEach((up: any) => {
+      (up.trainingPath?.modules || []).forEach((tpm: any) => {
+        if (tpm.moduleId) assignedModuleIds.add(tpm.moduleId);
+      });
+    });
+
+    if (!assignedModuleIds.has(moduleData.id)) {
+      redirect("/training");
+    }
+  }
+
   const module = {
     ...moduleData,
     assets: (moduleData.assets || []).sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),

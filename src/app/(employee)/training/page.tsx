@@ -1,12 +1,13 @@
 import { db } from "@/lib/db";
 import { getUser } from "@/lib/auth";
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
-  BookOpen, Users, Coffee, UtensilsCrossed, ChefHat, Shield,
-  ClipboardList, Sparkles, Wine, AlertCircle, Smartphone,
-  FileText, GraduationCap, Briefcase, Heart, Droplets, Lock, CheckCircle2,
+  BookOpen, Users, Coffee, UtensilsCrossed, Shield,
+  ClipboardList, Wine, AlertCircle, Heart, Lock, CheckCircle2,
 } from "lucide-react";
 
 const sectionIcons: Record<string, any> = {
@@ -22,26 +23,78 @@ const sectionIcons: Record<string, any> = {
 
 export default async function TrainingLibraryPage() {
   const user = await getUser();
-  const userId = user?.id;
+  if (!user) redirect("/login");
+  const userId = user.id;
+  const isAdmin = ["SUPER_ADMIN", "ADMIN", "MANAGER"].includes(user.role);
 
-  const [sectionsResult, completionsResult] = await Promise.all([
-    db.from("Section").select("*, modules:Module(*)").eq("isActive", true).order("sortOrder"),
-    userId ? db.from("ModuleCompletion").select("*").eq("userId", userId) : Promise.resolve({ data: [] }),
-  ]);
+  // Fetch employee's assigned training paths and their modules
+  const { data: userPaths } = await db
+    .from("UserTrainingPath")
+    .select("trainingPathId, trainingPath:TrainingPath(id, title, modules:TrainingPathModule(moduleId))")
+    .eq("userId", userId);
 
-  const sections = (sectionsResult.data || []).map((section: any) => ({
-    ...section,
-    modules: (section.modules || [])
-      .filter((m: any) => m.isActive)
-      .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
-  }));
-  const completions = completionsResult.data || [];
-  const completedIds = new Set(completions.map((c: any) => c.moduleId));
+  // Collect all assigned module IDs from training paths
+  const assignedModuleIds = new Set<string>();
+  const assignedSectionIds = new Set<string>();
 
-  // Determine which sections are complete (all modules done)
-  const sectionComplete = (section: any) => {
-    return section.modules.length > 0 && section.modules.every((m: any) => completedIds.has(m.id));
-  };
+  (userPaths || []).forEach((up: any) => {
+    (up.trainingPath?.modules || []).forEach((tpm: any) => {
+      if (tpm.moduleId) assignedModuleIds.add(tpm.moduleId);
+    });
+  });
+
+  // If no paths assigned and not admin, show empty state
+  if (assignedModuleIds.size === 0 && !isAdmin) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Training Library</h1>
+          <p className="text-gray-500 mt-1">Your assigned training content</p>
+        </div>
+        <EmptyState
+          icon={BookOpen}
+          title="No Training Assigned"
+          description="Your manager hasn't assigned a training path yet. Check back soon or contact your manager."
+        />
+      </div>
+    );
+  }
+
+  // Fetch all sections with modules
+  const { data: allSections } = await db
+    .from("Section")
+    .select("*, modules:Module(*)")
+    .eq("isActive", true)
+    .order("sortOrder");
+
+  // Fetch completions
+  const { data: completionsData } = await db
+    .from("ModuleCompletion")
+    .select("*")
+    .eq("userId", userId);
+
+  const completedIds = new Set((completionsData || []).map((c: any) => c.moduleId));
+
+  // Filter sections: only include sections that have at least one assigned module
+  // Admins see everything
+  const sections = (allSections || [])
+    .map((section: any) => {
+      const activeModules = (section.modules || [])
+        .filter((m: any) => m.isActive)
+        .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+
+      // For non-admins, only include modules that are in their assigned training paths
+      const visibleModules = isAdmin
+        ? activeModules
+        : activeModules.filter((m: any) => assignedModuleIds.has(m.id));
+
+      return { ...section, modules: visibleModules };
+    })
+    .filter((section: any) => section.modules.length > 0);
+
+  // Section completion check
+  const sectionComplete = (section: any) =>
+    section.modules.length > 0 && section.modules.every((m: any) => completedIds.has(m.id));
 
   return (
     <div className="space-y-6">
@@ -56,8 +109,6 @@ export default async function TrainingLibraryPage() {
           const totalModules = section.modules.length;
           const completedModules = section.modules.filter((m: any) => completedIds.has(m.id)).length;
           const isComplete = sectionComplete(section);
-
-          // Section is accessible if it's the first, or the previous section is complete
           const previousComplete = index === 0 || sectionComplete(sections[index - 1]);
           const isAccessible = isComplete || previousComplete;
 
@@ -71,9 +122,7 @@ export default async function TrainingLibraryPage() {
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-gray-400">{section.title}</h3>
                     <p className="text-sm text-gray-400 mt-1">Complete the previous section to unlock</p>
-                    <div className="flex items-center gap-3 mt-3">
-                      <span className="text-xs text-gray-400">{totalModules} modules</span>
-                    </div>
+                    <span className="text-xs text-gray-400">{totalModules} modules</span>
                   </div>
                 </div>
               </Card>
@@ -84,9 +133,7 @@ export default async function TrainingLibraryPage() {
             <Link key={section.id} href={`/training/${section.slug}`}>
               <Card hover className="h-full">
                 <div className="flex items-start gap-4">
-                  <div className={`p-3 rounded-xl shrink-0 ${
-                    isComplete ? "bg-ditch-green/10" : "bg-ditch-orange/10"
-                  }`}>
+                  <div className={`p-3 rounded-xl shrink-0 ${isComplete ? "bg-ditch-green/10" : "bg-ditch-orange/10"}`}>
                     {isComplete ? (
                       <CheckCircle2 className="w-6 h-6 text-ditch-green" />
                     ) : (
@@ -102,9 +149,7 @@ export default async function TrainingLibraryPage() {
                     <div className="flex items-center gap-3 mt-3">
                       <span className="text-xs text-gray-400">{totalModules} modules</span>
                       {completedModules > 0 && !isComplete && (
-                        <Badge variant="in-progress">
-                          {completedModules}/{totalModules} done
-                        </Badge>
+                        <Badge variant="in-progress">{completedModules}/{totalModules} done</Badge>
                       )}
                     </div>
                   </div>
