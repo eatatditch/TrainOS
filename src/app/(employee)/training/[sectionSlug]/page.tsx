@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { getUser } from "@/lib/auth";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +22,40 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
     .single();
 
   if (!sectionData) notFound();
+
+  // Enforce sequential section order — check if previous section is complete
+  if (userId) {
+    const { data: allSections } = await db
+      .from("Section")
+      .select("id, slug, sortOrder, modules:Module(id)")
+      .eq("isActive", true)
+      .order("sortOrder");
+
+    const sortedSections = (allSections || []).map((s: any) => ({
+      ...s,
+      modules: (s.modules || []),
+    }));
+
+    const currentIdx = sortedSections.findIndex((s: any) => s.id === sectionData.id);
+
+    if (currentIdx > 0) {
+      const prevSection = sortedSections[currentIdx - 1];
+      const prevModuleIds = prevSection.modules.map((m: any) => m.id);
+
+      if (prevModuleIds.length > 0) {
+        const { data: prevCompletions } = await db
+          .from("ModuleCompletion")
+          .select("moduleId")
+          .eq("userId", userId)
+          .in("moduleId", prevModuleIds);
+
+        const prevCompletedCount = new Set((prevCompletions || []).map((c: any) => c.moduleId)).size;
+        if (prevCompletedCount < prevModuleIds.length) {
+          redirect("/training");
+        }
+      }
+    }
+  }
 
   const section = {
     ...sectionData,
@@ -87,19 +121,37 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
         </div>
       )}
 
-      {/* Module List */}
+      {/* Module List — Sequential Order Enforced */}
       <div className="space-y-3">
         {section.modules.map((mod: any, index: number) => {
           const isCompleted = completedIds.has(mod.id);
+          const previousCompleted = index === 0 || completedIds.has(section.modules[index - 1].id);
+          const isAccessible = isCompleted || previousCompleted;
           const hasVideo = (mod.assets || []).some((a: any) => a.fileType === "VIDEO");
           const hasPDF = (mod.assets || []).some((a: any) => a.fileType === "PDF" || a.fileType === "DOCUMENT" || a.fileType === "CHECKLIST");
           const hasImages = (mod.assets || []).some((a: any) => a.fileType === "IMAGE");
+
+          if (!isAccessible) {
+            return (
+              <Card key={mod.id} className="flex items-center gap-4 opacity-50">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-gray-100 text-gray-400">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-medium text-gray-400 truncate">{mod.title}</h3>
+                  </div>
+                  <p className="text-sm text-gray-400 mt-0.5">Complete the previous module to unlock</p>
+                </div>
+              </Card>
+            );
+          }
 
           return (
             <Link key={mod.id} href={`/training/${sectionSlug}/${mod.slug}`}>
               <Card hover className="flex items-center gap-4">
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                  isCompleted ? "bg-ditch-green text-white" : "bg-gray-100 text-gray-500"
+                  isCompleted ? "bg-ditch-green text-white" : "bg-ditch-orange/10 text-ditch-orange"
                 }`}>
                   {isCompleted ? (
                     <CheckCircle2 className="w-5 h-5" />

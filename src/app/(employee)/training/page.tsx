@@ -6,26 +6,18 @@ import { Badge } from "@/components/ui/badge";
 import {
   BookOpen, Users, Coffee, UtensilsCrossed, ChefHat, Shield,
   ClipboardList, Sparkles, Wine, AlertCircle, Smartphone,
-  FileText, GraduationCap, Briefcase, Heart, Droplets,
+  FileText, GraduationCap, Briefcase, Heart, Droplets, Lock, CheckCircle2,
 } from "lucide-react";
 
 const sectionIcons: Record<string, any> = {
-  "new-hire-onboarding": GraduationCap,
+  "brand-culture": Heart,
   "server-training": UtensilsCrossed,
   "bartender-training": Wine,
-  "host-training": Users,
-  "kitchen-training": ChefHat,
-  "manager-training": Briefcase,
-  "opening-procedures": ClipboardList,
-  "closing-procedures": ClipboardList,
-  "side-work": Sparkles,
-  "guest-experience": Heart,
-  "allergy-protocol": AlertCircle,
-  "food-safety": Shield,
+  "support-staff-training": Users,
+  "safety-sanitation-security": Shield,
   "menu-knowledge": Coffee,
-  "pos-basics": Smartphone,
-  "hr-policies": FileText,
-  "cleaning-sanitation": Droplets,
+  "opening-closing-procedures": ClipboardList,
+  "alcohol-awareness": AlertCircle,
 };
 
 export default async function TrainingLibraryPage() {
@@ -44,36 +36,73 @@ export default async function TrainingLibraryPage() {
       .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
   }));
   const completions = completionsResult.data || [];
-
   const completedIds = new Set(completions.map((c: any) => c.moduleId));
+
+  // Determine which sections are complete (all modules done)
+  const sectionComplete = (section: any) => {
+    return section.modules.length > 0 && section.modules.every((m: any) => completedIds.has(m.id));
+  };
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Training Library</h1>
-        <p className="text-gray-500 mt-1">Browse all Ditch training sections and modules</p>
+        <p className="text-gray-500 mt-1">Complete each section in order to progress through your training</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {sections.map((section: any) => {
+      <div className="space-y-3">
+        {sections.map((section: any, index: number) => {
           const Icon = sectionIcons[section.slug] || BookOpen;
           const totalModules = section.modules.length;
           const completedModules = section.modules.filter((m: any) => completedIds.has(m.id)).length;
+          const isComplete = sectionComplete(section);
+
+          // Section is accessible if it's the first, or the previous section is complete
+          const previousComplete = index === 0 || sectionComplete(sections[index - 1]);
+          const isAccessible = isComplete || previousComplete;
+
+          if (!isAccessible) {
+            return (
+              <Card key={section.id} className="opacity-50">
+                <div className="flex items-start gap-4">
+                  <div className="p-3 bg-gray-100 rounded-xl shrink-0">
+                    <Lock className="w-6 h-6 text-gray-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-semibold text-gray-400">{section.title}</h3>
+                    <p className="text-sm text-gray-400 mt-1">Complete the previous section to unlock</p>
+                    <div className="flex items-center gap-3 mt-3">
+                      <span className="text-xs text-gray-400">{totalModules} modules</span>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            );
+          }
 
           return (
             <Link key={section.id} href={`/training/${section.slug}`}>
               <Card hover className="h-full">
                 <div className="flex items-start gap-4">
-                  <div className="p-3 bg-ditch-orange/10 rounded-xl shrink-0">
-                    <Icon className="w-6 h-6 text-ditch-orange" />
+                  <div className={`p-3 rounded-xl shrink-0 ${
+                    isComplete ? "bg-ditch-green/10" : "bg-ditch-orange/10"
+                  }`}>
+                    {isComplete ? (
+                      <CheckCircle2 className="w-6 h-6 text-ditch-green" />
+                    ) : (
+                      <Icon className="w-6 h-6 text-ditch-orange" />
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-gray-900">{section.title}</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold text-gray-900">{section.title}</h3>
+                      {isComplete && <Badge variant="completed">Complete</Badge>}
+                    </div>
                     <p className="text-sm text-gray-500 mt-1 line-clamp-2">{section.description}</p>
                     <div className="flex items-center gap-3 mt-3">
                       <span className="text-xs text-gray-400">{totalModules} modules</span>
-                      {completedModules > 0 && (
-                        <Badge variant="completed">
+                      {completedModules > 0 && !isComplete && (
+                        <Badge variant="in-progress">
                           {completedModules}/{totalModules} done
                         </Badge>
                       )}

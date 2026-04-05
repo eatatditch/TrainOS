@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, Clock } from "lucide-react";
@@ -9,35 +9,44 @@ const REQUIRED_SECONDS = 300; // 5 minutes
 
 export function MarkCompleteButton({ moduleId }: { moduleId: string }) {
   const [loading, setLoading] = useState(false);
-  const [secondsElapsed, setSecondsElapsed] = useState(0);
+  const [secondsOnPage, setSecondsOnPage] = useState(0);
   const [unlocked, setUnlocked] = useState(false);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const activeRef = useRef(true);
+  const tickRef = useRef<NodeJS.Timeout | null>(null);
   const router = useRouter();
 
   useEffect(() => {
-    // Check if this module was already timed in this session
-    const storageKey = `module-timer-${moduleId}`;
-    const stored = sessionStorage.getItem(storageKey);
-    const startTime = stored ? parseInt(stored) : Date.now();
-
-    if (!stored) {
-      sessionStorage.setItem(storageKey, startTime.toString());
+    // Load accumulated time for this module from localStorage
+    const storageKey = `module-active-time-${moduleId}`;
+    const stored = parseInt(localStorage.getItem(storageKey) || "0");
+    setSecondsOnPage(stored);
+    if (stored >= REQUIRED_SECONDS) {
+      setUnlocked(true);
+      return;
     }
 
-    const updateTimer = () => {
-      const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      setSecondsElapsed(elapsed);
-      if (elapsed >= REQUIRED_SECONDS) {
-        setUnlocked(true);
-        if (timerRef.current) clearInterval(timerRef.current);
-      }
+    // Track visibility — pause when tab is hidden or user navigates away
+    const handleVisibility = () => {
+      activeRef.current = document.visibilityState === "visible";
     };
+    document.addEventListener("visibilitychange", handleVisibility);
 
-    updateTimer();
-    timerRef.current = setInterval(updateTimer, 1000);
+    // Tick every second, but only count if page is active/visible
+    let accumulated = stored;
+    tickRef.current = setInterval(() => {
+      if (!activeRef.current) return;
+      accumulated += 1;
+      setSecondsOnPage(accumulated);
+      localStorage.setItem(storageKey, accumulated.toString());
+      if (accumulated >= REQUIRED_SECONDS) {
+        setUnlocked(true);
+        if (tickRef.current) clearInterval(tickRef.current);
+      }
+    }, 1000);
 
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (tickRef.current) clearInterval(tickRef.current);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [moduleId]);
 
@@ -51,8 +60,7 @@ export function MarkCompleteButton({ moduleId }: { moduleId: string }) {
         body: JSON.stringify({ moduleId }),
       });
       if (res.ok) {
-        // Clear timer from session storage
-        sessionStorage.removeItem(`module-timer-${moduleId}`);
+        localStorage.removeItem(`module-active-time-${moduleId}`);
         router.refresh();
       }
     } catch {
@@ -62,7 +70,7 @@ export function MarkCompleteButton({ moduleId }: { moduleId: string }) {
     }
   };
 
-  const remaining = Math.max(0, REQUIRED_SECONDS - secondsElapsed);
+  const remaining = Math.max(0, REQUIRED_SECONDS - secondsOnPage);
   const minutes = Math.floor(remaining / 60);
   const seconds = remaining % 60;
 
@@ -77,7 +85,7 @@ export function MarkCompleteButton({ moduleId }: { moduleId: string }) {
           <CheckCircle2 className="w-5 h-5" />
           Mark as Complete
         </Button>
-        <p className="text-xs text-gray-400">Please review the module content for at least 5 minutes</p>
+        <p className="text-xs text-gray-400">Please review this module for at least 5 minutes</p>
       </div>
     );
   }

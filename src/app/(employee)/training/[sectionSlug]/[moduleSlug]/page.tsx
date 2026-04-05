@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { getUser } from "@/lib/auth";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -41,6 +41,34 @@ export default async function ModuleDetailPage({
     ...moduleData,
     assets: (moduleData.assets || []).sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
   };
+
+  // Enforce sequential module order — check if previous module is completed
+  if (userId) {
+    const { data: allSectionModules } = await db
+      .from("Module")
+      .select("id, sortOrder, slug")
+      .eq("sectionId", sectionData.id)
+      .eq("isActive", true)
+      .order("sortOrder");
+
+    const sorted = (allSectionModules || []).sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+    const currentIndex = sorted.findIndex((m: any) => m.id === module.id);
+
+    if (currentIndex > 0) {
+      const prevModule = sorted[currentIndex - 1];
+      const { data: prevCompletion } = await db
+        .from("ModuleCompletion")
+        .select("id")
+        .eq("userId", userId)
+        .eq("moduleId", prevModule.id)
+        .limit(1);
+
+      if (!prevCompletion || prevCompletion.length === 0) {
+        // Previous module not completed — redirect back to section
+        redirect(`/training/${sectionSlug}`);
+      }
+    }
+  }
 
   let isCompleted = false;
   if (userId) {
