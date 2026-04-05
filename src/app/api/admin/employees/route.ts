@@ -22,12 +22,13 @@ export async function GET(request: NextRequest) {
 
   const { data: users } = await query;
 
-  // Fetch counts separately for assignments and completions
-  const usersWithCounts = await Promise.all(
+  // Fetch counts and training path assignments
+  const usersWithData = await Promise.all(
     (users || []).map(async (u: any) => {
-      const [{ count: assignmentCount }, { count: completionCount }] = await Promise.all([
+      const [{ count: assignmentCount }, { count: completionCount }, { data: paths }] = await Promise.all([
         db.from("ModuleAssignment").select("*", { count: "exact", head: true }).eq("userId", u.id),
         db.from("ModuleCompletion").select("*", { count: "exact", head: true }).eq("userId", u.id),
+        db.from("UserTrainingPath").select("*, trainingPath:TrainingPath(id, title)").eq("userId", u.id),
       ]);
       return {
         ...u,
@@ -35,11 +36,12 @@ export async function GET(request: NextRequest) {
           assignments: assignmentCount || 0,
           completions: completionCount || 0,
         },
+        trainingPaths: (paths || []).map((p: any) => p.trainingPath).filter(Boolean),
       };
     })
   );
 
-  return NextResponse.json(usersWithCounts);
+  return NextResponse.json(usersWithData);
 }
 
 export async function POST(request: NextRequest) {
@@ -88,5 +90,17 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Assign training paths if provided
+  if (data.trainingPathIds && data.trainingPathIds.length > 0) {
+    await db.from("UserTrainingPath").insert(
+      data.trainingPathIds.map((pathId: string) => ({
+        userId: newUser.id,
+        trainingPathId: pathId,
+        dueDate: data.dueDate || null,
+      }))
+    );
+  }
+
   return NextResponse.json({ id: newUser.id, email: newUser.email, firstName: newUser.firstName, lastName: newUser.lastName });
 }
