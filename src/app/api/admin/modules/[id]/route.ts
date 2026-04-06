@@ -25,6 +25,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
   const data = await request.json();
 
+  // Handle asset deletion
+  if (data.deleteAssetId) {
+    await db.from("ModuleAsset").delete().eq("id", data.deleteAssetId).eq("moduleId", id);
+    return NextResponse.json({ success: true, deleted: data.deleteAssetId });
+  }
+
   const updateData: any = {};
   if (data.title !== undefined) updateData.title = data.title;
   if (data.description !== undefined) updateData.description = data.description;
