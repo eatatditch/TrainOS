@@ -1,0 +1,22 @@
+{
+  "name": "SpecOS by Ditch",
+  "short_name": "SpecOS",
+  "description": "Instant cocktail specs, recipes, and operational answers for Ditch team members",
+  "start_url": "/specos",
+  "display": "standalone",
+  "background_color": "#030712",
+  "theme_color": "#cd6028",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/specos-icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/specos-icon-192.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
