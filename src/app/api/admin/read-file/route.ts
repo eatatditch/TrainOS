@@ -30,13 +30,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ fileName, text: result.value });
   }
 
-  // For PDFs, return base64 (can't easily extract text server-side without heavy deps)
+  // For PDFs, extract text
   if (fileName.endsWith(".pdf")) {
-    return NextResponse.json({
-      fileName,
-      text: "[PDF file - text extraction not available]",
-      sizeBytes: buffer.length,
-    });
+    const pdfParse = require("pdf-parse");
+    const result = await pdfParse(buffer);
+    return NextResponse.json({ fileName, text: result.text, pages: result.numpages });
   }
 
   return NextResponse.json({ fileName, text: "[Unsupported format]" });
