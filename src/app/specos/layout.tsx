@@ -1,9 +1,15 @@
 import type { Metadata, Viewport } from "next";
 
+const iconUrl = "https://uwalxhxajdkecucjcdwk.supabase.co/storage/v1/object/public/training-assets/specos-icon.png";
+
 export const metadata: Metadata = {
   title: "SpecOS — Ditch",
   description: "Instant cocktail specs, recipes, and operational answers for Ditch team members",
   manifest: "/specos-manifest.json",
+  icons: {
+    icon: iconUrl,
+    apple: iconUrl,
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
