@@ -1,11 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Search, Loader2, AlertTriangle, X, Sparkles, Zap, Lock } from "lucide-react";
+import { Search, Loader2, AlertTriangle, X, Sparkles, Zap, LogOut } from "lucide-react";
 import Link from "next/link";
-
-const SPECOS_PIN = "1234"; // Change this to your preferred PIN
-const STORAGE_KEY = "specos-auth";
+import { createClient } from "@/lib/supabase/client";
 
 interface Recipe {
   name: string;
@@ -38,83 +36,72 @@ interface SearchResult {
   tags: string[];
 }
 
-// ─── PIN Gate ────────────────────────────────────────────────────────────────
-function PinGate({ onUnlock }: { onUnlock: () => void }) {
-  const [pin, setPin] = useState("");
-  const [error, setError] = useState(false);
-  const [digits, setDigits] = useState(["", "", "", ""]);
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+// ─── Login Screen ────────────────────────────────────────────────────────────
+function LoginScreen() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    inputRefs.current[0]?.focus();
-  }, []);
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
 
-  const handleDigit = (index: number, value: string) => {
-    if (!/^\d*$/.test(value)) return;
-    const newDigits = [...digits];
-    newDigits[index] = value.slice(-1);
-    setDigits(newDigits);
-    setError(false);
+    const supabase = createClient();
+    const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
 
-    if (value && index < 3) {
-      inputRefs.current[index + 1]?.focus();
-    }
-
-    const fullPin = newDigits.join("");
-    if (fullPin.length === 4) {
-      if (fullPin === SPECOS_PIN) {
-        localStorage.setItem(STORAGE_KEY, Date.now().toString());
-        onUnlock();
-      } else {
-        setError(true);
-        setDigits(["", "", "", ""]);
-        setTimeout(() => inputRefs.current[0]?.focus(), 100);
-      }
-    }
-  };
-
-  const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
-    if (e.key === "Backspace" && !digits[index] && index > 0) {
-      inputRefs.current[index - 1]?.focus();
+    if (authError) {
+      setError("Invalid email or password");
+      setLoading(false);
+    } else {
+      window.location.reload();
     }
   };
 
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
-      <div className="text-center">
-        <div className="w-16 h-16 bg-ditch-orange rounded-2xl flex items-center justify-center mx-auto mb-6">
-          <Zap className="w-9 h-9 text-white" />
-        </div>
-        <h1 className="text-3xl font-bold text-white mb-1">SpecOS</h1>
-        <p className="text-gray-500 text-sm mb-8">Enter your team PIN to continue</p>
-
-        <div className="flex gap-3 justify-center mb-4">
-          {digits.map((digit, i) => (
-            <input
-              key={i}
-              ref={(el) => { inputRefs.current[i] = el; }}
-              type="tel"
-              inputMode="numeric"
-              maxLength={1}
-              value={digit}
-              onChange={(e) => handleDigit(i, e.target.value)}
-              onKeyDown={(e) => handleKeyDown(i, e)}
-              className={`w-14 h-16 text-center text-2xl font-bold rounded-xl border-2 bg-gray-900 text-white focus:outline-none transition-colors ${
-                error
-                  ? "border-red-500 animate-shake"
-                  : digit
-                  ? "border-ditch-orange"
-                  : "border-gray-800 focus:border-ditch-orange"
-              }`}
-            />
-          ))}
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 bg-ditch-orange rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Zap className="w-9 h-9 text-white" />
+          </div>
+          <h1 className="text-3xl font-bold text-white mb-1">SpecOS</h1>
+          <p className="text-gray-500 text-sm">Sign in with your Ditch account</p>
         </div>
 
-        {error && (
-          <p className="text-red-400 text-sm">Incorrect PIN. Try again.</p>
-        )}
+        <form onSubmit={handleLogin} className="space-y-4">
+          {error && (
+            <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm p-3 rounded-xl text-center">
+              {error}
+            </div>
+          )}
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email"
+            required
+            className="w-full px-4 py-3 rounded-xl bg-gray-900 border border-gray-800 text-white placeholder-gray-600 focus:border-ditch-orange focus:ring-0 focus:outline-none text-sm"
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+            required
+            className="w-full px-4 py-3 rounded-xl bg-gray-900 border border-gray-800 text-white placeholder-gray-600 focus:border-ditch-orange focus:ring-0 focus:outline-none text-sm"
+          />
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-3 bg-ditch-orange text-white font-medium rounded-xl hover:bg-ditch-orange/90 transition-colors disabled:opacity-50"
+          >
+            {loading ? "Signing in..." : "Sign In"}
+          </button>
+        </form>
 
-        <p className="text-gray-700 text-xs mt-8">Ditch Internal Use Only</p>
+        <p className="text-gray-700 text-xs text-center mt-8">Ditch Internal Use Only</p>
       </div>
     </div>
   );
@@ -122,7 +109,7 @@ function PinGate({ onUnlock }: { onUnlock: () => void }) {
 
 // ─── Main SpecOS App ─────────────────────────────────────────────────────────
 export default function SpecOSPage() {
-  const [authenticated, setAuthenticated] = useState(false);
+  const [user, setUser] = useState<any>(null);
   const [checking, setChecking] = useState(true);
   const [query, setQuery] = useState("");
   const [recipe, setRecipe] = useState<Recipe | null>(null);
@@ -132,18 +119,13 @@ export default function SpecOSPage() {
   const [searched, setSearched] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Check if already authenticated (PIN lasts 24 hours)
+  // Check Supabase auth session
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const elapsed = Date.now() - parseInt(stored);
-      if (elapsed < 24 * 60 * 60 * 1000) {
-        setAuthenticated(true);
-      } else {
-        localStorage.removeItem(STORAGE_KEY);
-      }
-    }
-    setChecking(false);
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user);
+      setChecking(false);
+    });
   }, []);
 
   const doSearch = useCallback(async (q: string) => {
@@ -177,11 +159,11 @@ export default function SpecOSPage() {
   }, [query, doSearch]);
 
   useEffect(() => {
-    if (authenticated) inputRef.current?.focus();
-    if (authenticated && "serviceWorker" in navigator) {
+    if (user) inputRef.current?.focus();
+    if (user && "serviceWorker" in navigator) {
       navigator.serviceWorker.register("/specos-sw.js").catch(() => {});
     }
-  }, [authenticated]);
+  }, [user]);
 
   const clearSearch = () => {
     setQuery("");
@@ -192,12 +174,18 @@ export default function SpecOSPage() {
     inputRef.current?.focus();
   };
 
+  const handleSignOut = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    setUser(null);
+  };
+
   if (checking) {
     return <div className="min-h-screen bg-gray-950" />;
   }
 
-  if (!authenticated) {
-    return <PinGate onUnlock={() => setAuthenticated(true)} />;
+  if (!user) {
+    return <LoginScreen />;
   }
 
   return (
@@ -215,10 +203,10 @@ export default function SpecOSPage() {
             </div>
           </button>
           <button
-            onClick={() => { localStorage.removeItem(STORAGE_KEY); setAuthenticated(false); }}
+            onClick={handleSignOut}
             className="text-xs text-gray-600 hover:text-gray-400 transition-colors flex items-center gap-1"
           >
-            <Lock className="w-3 h-3" /> Lock
+            <LogOut className="w-3 h-3" /> Sign Out
           </button>
         </div>
       </header>
