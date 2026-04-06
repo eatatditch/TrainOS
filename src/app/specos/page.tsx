@@ -205,15 +205,15 @@ export default function SpecOSPage() {
       {/* Header */}
       <header className="border-b border-gray-800 bg-gray-950/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <button onClick={clearSearch} className="flex items-center gap-2">
             <div className="w-8 h-8 bg-ditch-orange rounded-lg flex items-center justify-center">
               <Zap className="w-5 h-5 text-white" />
             </div>
-            <div>
+            <div className="text-left">
               <h1 className="text-white font-bold text-lg leading-none">SpecOS</h1>
               <p className="text-gray-500 text-[10px] uppercase tracking-widest">by Ditch</p>
             </div>
-          </div>
+          </button>
           <button
             onClick={() => { localStorage.removeItem(STORAGE_KEY); setAuthenticated(false); }}
             className="text-xs text-gray-600 hover:text-gray-400 transition-colors flex items-center gap-1"
