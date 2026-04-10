@@ -2,7 +2,7 @@
   "name": "Ditch Training",
   "short_name": "Training",
   "description": "Internal training and knowledge center for Ditch team members",
-  "start_url": "/training",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f9fafb",
