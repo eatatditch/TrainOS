@@ -9,8 +9,8 @@ export const metadata: Metadata = {
   description: "Internal training and knowledge center for Ditch team members",
   manifest: "/manifest.json",
   icons: {
-    icon: "/icon-192.png",
-    apple: "/icon-512.png",
+    icon: "https://uwalxhxajdkecucjcdwk.supabase.co/storage/v1/object/public/training-assets/trainos-icon.png",
+    apple: "https://uwalxhxajdkecucjcdwk.supabase.co/storage/v1/object/public/training-assets/trainos-icon.png",
   },
   appleWebApp: {
     capable: true,
