@@ -10,10 +10,16 @@
   "orientation": "portrait",
   "icons": [
     {
-      "src": "/trainos-icon.png",
+      "src": "/api/icon",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/api/icon",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
