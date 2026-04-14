@@ -64,7 +64,6 @@ interface SearchResult {
   tags: string[];
 }
 
-// ─── Login Screen ────────────────────────────────────────────────────────────
 function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -135,7 +134,6 @@ function LoginScreen() {
   );
 }
 
-// ─── Main SpecOS App ─────────────────────────────────────────────────────────
 export default function SpecOSPage() {
   const [user, setUser] = useState<any>(null);
   const [checking, setChecking] = useState(true);
@@ -222,7 +220,6 @@ export default function SpecOSPage() {
     setUser(null);
   };
 
-  // Voice search (dormant — not exposed in UI)
   const toggleVoice = () => {
     if (listening) {
       recognitionRef.current?.abort();
@@ -330,15 +327,15 @@ export default function SpecOSPage() {
           <div className="mt-6 mb-8">
             <div className="flex flex-wrap gap-2 justify-center">
               {[
-                { label: "Hang 10 Marg", icon: "🍹" },
                 { label: "Baja Fish Taco", icon: "🌮" },
-                { label: "Ditch Burger", icon: "🍔" },
+                { label: "Poké Bowl", icon: "🍣" },
+                { label: "Lobster Roll", icon: "🦞" },
+                { label: "Big Al Burger", icon: "🍔" },
                 { label: "Gluten-free items", icon: "🌾" },
                 { label: "Vegan options", icon: "🥬" },
-                { label: "Mojito", icon: "🌿" },
-                { label: "Espresso Martini", icon: "☕" },
-                { label: "Old Fashioned", icon: "🥃" },
-                { label: "Poké Bowl", icon: "🍣" },
+                { label: "Chips + Guac", icon: "🥑" },
+                { label: "Korean Chicken Sammy", icon: "🍗" },
+                { label: "Sirloin Steak", icon: "🥩" },
                 { label: "Churros", icon: "🍩" },
               ].map((q) => (
                 <button
