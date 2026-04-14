@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Search, Loader2, AlertTriangle, X, Sparkles, Zap, LogOut, Mic, MicOff } from "lucide-react";
+import { Search, Loader2, AlertTriangle, X, Sparkles, Zap, LogOut, Mic, MicOff, Utensils, CheckCircle2, Leaf } from "lucide-react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
@@ -17,6 +17,25 @@ interface Recipe {
   shelfLife: string;
   allergyWarning: string;
   source: { title: string; section: string; sectionSlug: string; moduleSlug: string };
+}
+
+interface FoodItem {
+  name: string;
+  category: string;
+  price: string;
+  badge: string;
+  description: string;
+  ingredients: string;
+  allergens: string[];
+  dietary: string[];
+  modifications: string;
+  tags: string[];
+  verdict?: { safe: boolean; text: string } | null;
+}
+
+interface FoodList {
+  label: string;
+  items: FoodItem[];
 }
 
 interface Answer {
@@ -113,6 +132,8 @@ export default function SpecOSPage() {
   const [checking, setChecking] = useState(true);
   const [query, setQuery] = useState("");
   const [recipe, setRecipe] = useState<Recipe | null>(null);
+  const [foodItem, setFoodItem] = useState<FoodItem | null>(null);
+  const [foodList, setFoodList] = useState<FoodList | null>(null);
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -133,6 +154,8 @@ export default function SpecOSPage() {
   const doSearch = useCallback(async (q: string) => {
     if (!q.trim()) {
       setRecipe(null);
+      setFoodItem(null);
+      setFoodList(null);
       setAnswer(null);
       setResults([]);
       setSearched(false);
@@ -145,6 +168,8 @@ export default function SpecOSPage() {
       if (res.ok) {
         const data = await res.json();
         setRecipe(data.recipe);
+        setFoodItem(data.foodItem);
+        setFoodList(data.foodList);
         setAnswer(data.answer);
         setResults(data.results || []);
       }
@@ -171,6 +196,8 @@ export default function SpecOSPage() {
   const clearSearch = () => {
     setQuery("");
     setRecipe(null);
+    setFoodItem(null);
+    setFoodList(null);
     setAnswer(null);
     setResults([]);
     setSearched(false);
@@ -295,15 +322,15 @@ export default function SpecOSPage() {
             <div className="flex flex-wrap gap-2 justify-center">
               {[
                 { label: "Hang 10 Marg", icon: "🍹" },
-                { label: "Espresso Martini", icon: "☕" },
-                { label: "Smoke on the Bay", icon: "🔥" },
+                { label: "Baja Fish Taco", icon: "🌮" },
+                { label: "Ditch Burger", icon: "🍔" },
+                { label: "Gluten-free items", icon: "🌾" },
+                { label: "Vegan options", icon: "🥬" },
                 { label: "Mojito", icon: "🌿" },
+                { label: "Espresso Martini", icon: "☕" },
                 { label: "Old Fashioned", icon: "🥃" },
-                { label: "Frozen Paloma", icon: "🧊" },
-                { label: "No-Jito", icon: "🍃" },
-                { label: "Margarita Mix", icon: "🧪" },
-                { label: "Simple Syrup", icon: "🍯" },
-                { label: "Falernum", icon: "⚗️" },
+                { label: "Poké Bowl", icon: "🍣" },
+                { label: "Churros", icon: "🍩" },
               ].map((q) => (
                 <button
                   key={q.label}
@@ -390,8 +417,124 @@ export default function SpecOSPage() {
           </div>
         )}
 
+        {/* Food Item Card */}
+        {searched && !loading && !recipe && foodItem && (
+          <div className="mt-6 mb-8">
+            <div className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
+              <div className="bg-gradient-to-r from-ditch-navy to-ditch-navy/80 px-6 py-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-ditch-orange text-xs uppercase tracking-widest font-semibold">{foodItem.category}</p>
+                    <h2 className="text-white font-bold text-xl mt-0.5">{foodItem.name}</h2>
+                    {foodItem.badge && <p className="text-gray-400 text-xs mt-0.5">{foodItem.badge}</p>}
+                  </div>
+                  {foodItem.price && <span className="text-ditch-orange font-bold text-xl">{foodItem.price}</span>}
+                </div>
+              </div>
+
+              {foodItem.verdict && (
+                <div
+                  className={`px-6 py-3 flex items-start gap-2 border-b ${
+                    foodItem.verdict.safe
+                      ? "bg-ditch-green/10 border-ditch-green/20"
+                      : "bg-red-500/10 border-red-500/20"
+                  }`}
+                >
+                  {foodItem.verdict.safe ? (
+                    <CheckCircle2 className="w-4 h-4 text-ditch-green shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                  )}
+                  <span
+                    className={`text-sm font-medium ${
+                      foodItem.verdict.safe ? "text-ditch-green" : "text-red-400"
+                    }`}
+                  >
+                    {foodItem.verdict.text}
+                  </span>
+                </div>
+              )}
+
+              <div className="p-6 space-y-4">
+                {foodItem.description && (
+                  <p className="text-gray-200 text-sm leading-relaxed">{foodItem.description}</p>
+                )}
+
+                {foodItem.ingredients && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Ingredients</p>
+                    <p className="text-gray-300 text-sm">{foodItem.ingredients}</p>
+                  </div>
+                )}
+
+                {foodItem.allergens.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Contains</p>
+                    <div className="flex flex-wrap gap-2">
+                      {foodItem.allergens.map((a) => (
+                        <span key={a} className="px-2 py-0.5 bg-red-500/10 text-red-400 rounded-full text-xs font-medium capitalize">
+                          {a}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {foodItem.dietary.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Dietary</p>
+                    <div className="flex flex-wrap gap-2">
+                      {foodItem.dietary.map((d) => (
+                        <span key={d} className="px-2 py-0.5 bg-ditch-green/10 text-ditch-green rounded-full text-xs font-medium capitalize">
+                          {d.replace(/-/g, " ")}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {foodItem.modifications && (
+                  <div className="pt-2 border-t border-gray-800">
+                    <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Modifications</p>
+                    <p className="text-gray-300 text-sm">{foodItem.modifications}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Food List (dietary/allergen filter results) */}
+        {searched && !loading && !recipe && !foodItem && foodList && foodList.items.length > 0 && (
+          <div className="mt-6 mb-8">
+            <div className="flex items-center gap-2 mb-4">
+              <Leaf className="w-5 h-5 text-ditch-green" />
+              <h2 className="text-white font-bold text-lg capitalize">{foodList.label}</h2>
+              <span className="text-gray-500 text-sm">({foodList.items.length})</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {foodList.items.map((item) => (
+                <button
+                  key={item.name}
+                  onClick={() => setQuery(item.name)}
+                  className="text-left p-4 bg-gray-900 border border-gray-800 rounded-xl hover:border-ditch-orange transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">{item.category}</p>
+                      <h3 className="font-medium text-white text-sm mt-0.5">{item.name}</h3>
+                      <p className="text-xs text-gray-400 mt-1 line-clamp-2">{item.description}</p>
+                    </div>
+                    {item.price && <span className="text-ditch-orange font-bold text-sm shrink-0">{item.price}</span>}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Text Answer */}
-        {searched && !loading && !recipe && answer && (
+        {searched && !loading && !recipe && !foodItem && !foodList && answer && (
           <div className="mt-6 mb-8">
             <div className="bg-gray-900 rounded-2xl border border-gray-800 p-6">
               <div className="flex items-start gap-3">
@@ -408,7 +551,7 @@ export default function SpecOSPage() {
         )}
 
         {/* Module Results */}
-        {searched && !loading && !recipe && results.length > 0 && (
+        {searched && !loading && !recipe && !foodItem && !foodList && results.length > 0 && (
           <div className="mt-4 mb-8 space-y-2">
             {results.map((result) => (
               <Link
@@ -425,7 +568,7 @@ export default function SpecOSPage() {
         )}
 
         {/* No results */}
-        {searched && !loading && !recipe && !answer && results.length === 0 && (
+        {searched && !loading && !recipe && !foodItem && !foodList && !answer && results.length === 0 && (
           <div className="mt-6 text-center">
             <p className="text-gray-500">No results found. Try a different search.</p>
           </div>
