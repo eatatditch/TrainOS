@@ -32,7 +32,7 @@ function buildTags(item: any, existingTags: string[] = []): string[] {
   for (const t of existingTags) {
     const lower = t.toLowerCase();
     if (lower.startsWith("contains-")) continue;
-    if (["vegan", "vegetarian", "gluten-free", "gluten-free-friendly", "dairy-free", "dairy-free-friendly", "pescatarian"].includes(lower)) continue;
+    if (["vegan", "vegetarian", "gluten-free", "gluten-friendly", "dairy-free", "dairy-free-friendly", "pescatarian"].includes(lower)) continue;
     set.add(lower);
   }
   return Array.from(set);
