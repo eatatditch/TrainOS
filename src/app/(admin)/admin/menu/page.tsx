@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Utensils, Flame, Package, Plus, Settings } from "lucide-react";
+import { Utensils, Flame, Package, Plus, Settings, BookOpen } from "lucide-react";
 
 interface FoodItem {
   id: string;
@@ -49,7 +49,7 @@ export default function MenuAdminPage() {
           <h1 className="text-2xl font-bold text-gray-900">Menu & Kitchen</h1>
           <p className="text-gray-500 mt-1">Edit menu items, ingredients, and kitchen config. Changes are live instantly in SpecOS.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Link href="/admin/menu/kitchen">
             <Button variant="secondary" className="flex items-center gap-2">
               <Flame className="w-4 h-4" /> Kitchen Config
@@ -58,6 +58,11 @@ export default function MenuAdminPage() {
           <Link href="/admin/menu/ingredients">
             <Button variant="secondary" className="flex items-center gap-2">
               <Package className="w-4 h-4" /> Ingredients
+            </Button>
+          </Link>
+          <Link href="/admin/menu/definitions">
+            <Button variant="secondary" className="flex items-center gap-2">
+              <BookOpen className="w-4 h-4" /> Definitions
             </Button>
           </Link>
           <Link href="/admin/menu/new">
