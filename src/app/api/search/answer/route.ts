@@ -164,7 +164,6 @@ export async function GET(request: NextRequest) {
       .select("*")
       .eq("contentType", "food");
 
-    // First pass: static tag filter
     const tagMatches = (allFood || []).filter((item: any) => {
       const tagSet = new Set((item.tags || []).map((t: string) => t.toLowerCase()));
       if (targetDietary) {
@@ -172,7 +171,7 @@ export async function GET(request: NextRequest) {
         if (targetDietary === "vegetarian")
           return tagSet.has("vegetarian") || tagSet.has("vegan");
         if (targetDietary === "gluten-free")
-          return tagSet.has("gluten-free") || tagSet.has("gluten-free-friendly");
+          return tagSet.has("gluten-free") || tagSet.has("gluten-friendly");
         if (targetDietary === "dairy-free")
           return tagSet.has("dairy-free") && !tagSet.has("contains-dairy");
         if (targetDietary === "pescatarian")
@@ -184,9 +183,6 @@ export async function GET(request: NextRequest) {
       return false;
     });
 
-    // Second pass: apply cross-contamination augmentation (KitchenConfig +
-    // linked ingredients) and exclude items that pick up the restricted
-    // allergen via shared equipment or an ingredient.
     const excludedAllergen =
       targetAllergen ||
       (targetDietary === "gluten-free"
@@ -338,7 +334,7 @@ export async function GET(request: NextRequest) {
       else if (targetDietary === "vegetarian")
         ok = tagSet.has("vegetarian") || tagSet.has("vegan");
       else if (targetDietary === "gluten-free")
-        ok = tagSet.has("gluten-free") || tagSet.has("gluten-free-friendly");
+        ok = tagSet.has("gluten-free") || tagSet.has("gluten-friendly");
       else if (targetDietary === "dairy-free")
         ok = tagSet.has("dairy-free") && !tagSet.has("contains-dairy");
       else if (targetDietary === "pescatarian")
