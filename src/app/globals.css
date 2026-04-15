@@ -38,3 +38,12 @@
     @apply border-2 border-ditch-navy text-ditch-navy px-6 py-2.5 rounded-lg font-medium hover:bg-ditch-navy hover:text-white transition-colors;
   }
 }
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
