@@ -8,6 +8,8 @@ export interface AppUser {
   firstName: string;
   lastName: string;
   role: "SUPER_ADMIN" | "ADMIN" | "MANAGER" | "EMPLOYEE";
+  /** Bypass the 5-minute review timer on training modules. Set per-employee in /admin/employees. */
+  skipReviewTimer: boolean;
 }
 
 /**
@@ -24,7 +26,7 @@ export async function getUser(): Promise<AppUser | null> {
 
   const { data: profile } = await db
     .from("User")
-    .select("id, authId, email, firstName, lastName, role, isActive")
+    .select("id, authId, email, firstName, lastName, role, isActive, skipReviewTimer")
     .eq("authId", authUser.id)
     .eq("isActive", true)
     .single();
@@ -38,5 +40,6 @@ export async function getUser(): Promise<AppUser | null> {
     firstName: profile.firstName,
     lastName: profile.lastName,
     role: profile.role as AppUser["role"],
+    skipReviewTimer: !!profile.skipReviewTimer,
   };
 }
