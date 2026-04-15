@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Search, Loader2, AlertTriangle, X, Sparkles, CheckCircle2, Leaf, Brain, Info, Utensils, BookOpen } from "lucide-react";
+import { PalomaMan } from "@/components/paloma-man";
 
 interface FoodItem {
   name: string;
@@ -373,6 +374,13 @@ export default function MenuPage() {
           </p>
         </div>
       )}
+
+      <PalomaMan
+        size="sm"
+        position="bottom-right"
+        dismissKey="menu"
+        message="Guest asking about allergens? Tap a dish — I'll show what's in it."
+      />
     </div>
   );
 }
