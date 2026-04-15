@@ -17,6 +17,7 @@ import {
   Brain,
   Info,
 } from "lucide-react";
+import { PalomaMan } from "@/components/paloma-man";
 
 interface SearchResult {
   id: string;
@@ -555,6 +556,13 @@ export default function SearchPage() {
           </p>
         </div>
       )}
+
+      <PalomaMan
+        size="sm"
+        position="bottom-right"
+        dismissKey="search"
+        message="Stuck? Type a full question — I can handle menu, allergens, and medical stuff too."
+      />
     </div>
   );
 }
