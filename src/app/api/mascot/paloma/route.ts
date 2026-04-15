@@ -35,14 +35,29 @@ const FALLBACK_SVG = `<?xml version="1.0" encoding="UTF-8"?>
   <circle cx="100" cy="155" r="4" fill="#cd6028"/>
 </svg>`;
 
-export async function GET() {
-  // If a real paloma-man.png lands in the training-assets bucket, redirect to it.
+export async function GET(req: Request) {
+  // Cache-buster: callers can append ?v=anything to force a fresh fetch from
+  // Supabase (and a fresh response from us). Without it we still revalidate
+  // every request, but we'll serve a short-lived cached copy.
+  const url = new URL(req.url);
+  const version = url.searchParams.get("v") || "";
+  const pngUrl = version ? `${PUBLIC_PNG_URL}?v=${encodeURIComponent(version)}` : PUBLIC_PNG_URL;
+
+  // Try to fetch the real PNG. If found, stream it back ourselves so we
+  // control cache headers end-to-end (no stale 302 redirects hanging around
+  // in the browser after Tracy re-uploads the file).
   try {
-    const head = await fetch(PUBLIC_PNG_URL, { method: "HEAD" });
-    if (head.ok) {
-      return NextResponse.redirect(PUBLIC_PNG_URL, {
-        status: 302,
-        headers: { "Cache-Control": "public, max-age=86400" },
+    const res = await fetch(pngUrl, { cache: "no-store" });
+    if (res.ok) {
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      return new NextResponse(bytes, {
+        status: 200,
+        headers: {
+          "Content-Type": res.headers.get("content-type") || "image/png",
+          // Short cache so re-uploads show up quickly. must-revalidate so
+          // browsers re-check with us instead of blindly serving stale.
+          "Cache-Control": "public, max-age=60, must-revalidate",
+        },
       });
     }
   } catch {
@@ -54,7 +69,6 @@ export async function GET() {
     status: 200,
     headers: {
       "Content-Type": "image/svg+xml",
-      // Short cache so the real PNG is picked up quickly once uploaded.
       "Cache-Control": "public, max-age=300",
     },
   });
