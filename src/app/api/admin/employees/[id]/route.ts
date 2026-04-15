@@ -71,6 +71,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (data.location !== undefined) updateData.location = data.location;
   if (data.phone !== undefined) updateData.phone = data.phone;
   if (data.isActive !== undefined) updateData.isActive = data.isActive;
+  if (data.skipReviewTimer !== undefined) updateData.skipReviewTimer = !!data.skipReviewTimer;
 
   const { data: updatedUser, error } = await db
     .from("User")
