@@ -9,6 +9,7 @@ import {
   BookOpen, Users, Coffee, UtensilsCrossed, Shield,
   ClipboardList, Wine, AlertCircle, Heart, Lock, CheckCircle2,
 } from "lucide-react";
+import { PalomaMan } from "@/components/paloma-man";
 
 const sectionIcons: Record<string, any> = {
   "brand-culture": Heart,
@@ -98,9 +99,14 @@ export default async function TrainingLibraryPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Training Library</h1>
-        <p className="text-gray-500 mt-1">Complete each section in order to progress through your training</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Training Library</h1>
+          <p className="text-gray-500 mt-1">Complete each section in order to progress through your training</p>
+        </div>
+        <div className="hidden sm:block shrink-0">
+          <PalomaMan size="sm" message="One section at a time — you've got this!" />
+        </div>
       </div>
 
       <div className="space-y-3">
