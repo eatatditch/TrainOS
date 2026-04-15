@@ -264,7 +264,7 @@ export default async function ModuleDetailPage({
       {/* Mark Complete */}
       {userId && !isCompleted && (
         <div className="flex justify-end">
-          <MarkCompleteButton moduleId={module.id} />
+          <MarkCompleteButton moduleId={module.id} skipReviewTimer={user?.skipReviewTimer} />
         </div>
       )}
 
