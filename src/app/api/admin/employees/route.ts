@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
 
   let query = db
     .from("User")
-    .select("id, email, firstName, lastName, role, location, phone, hireDate, isActive, createdAt")
+    .select("id, email, firstName, lastName, role, location, phone, hireDate, isActive, skipReviewTimer, createdAt")
     .order("lastName");
 
   if (role) query = query.eq("role", role);
