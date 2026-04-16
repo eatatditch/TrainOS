@@ -86,53 +86,30 @@ export function SurfingLoader({ dark = false, message }: SurfingLoaderProps) {
           </path>
         </svg>
 
-        {/* Surfer — surfs left to right, bobbing on the wave */}
-        <div className="absolute bottom-6 left-0 w-full">
-          <div className="surfer-track">
-            <svg width="56" height="56" viewBox="0 0 100 100" aria-hidden>
-              {/* surfboard */}
-              <ellipse
-                cx="50"
-                cy="78"
-                rx="32"
-                ry="6"
-                fill="#cd6028"
-                stroke="#a44a1e"
-                strokeWidth="1"
-              />
-              <ellipse cx="50" cy="76" rx="28" ry="3" fill="#fff" opacity="0.4" />
-              {/* legs */}
-              <path
-                d="M44 72 L42 60 M56 72 L58 60"
-                stroke="#e8b58a"
-                strokeWidth="4"
-                strokeLinecap="round"
-                fill="none"
-              />
-              {/* body */}
-              <path
-                d="M50 38 L44 64 L56 64 Z"
-                fill="#cd6028"
-              />
-              {/* arms out for balance */}
-              <path
-                d="M44 50 L32 46 M56 50 L68 46"
-                stroke="#e8b58a"
-                strokeWidth="3.5"
-                strokeLinecap="round"
-                fill="none"
-              />
-              {/* head */}
-              <circle cx="50" cy="30" r="8" fill="#e8b58a" />
-              {/* hair */}
-              <path
-                d="M43 26 Q45 20 50 21 Q55 20 57 26 Q54 24 50 24 Q46 24 43 26 Z"
-                fill="#3a2a1a"
-              />
-              {/* sunglasses */}
-              <rect x="44" y="28" width="5" height="3" rx="1" fill="#1a1a1a" />
-              <rect x="51" y="28" width="5" height="3" rx="1" fill="#1a1a1a" />
+        {/* Paloma Man — surfs left to right, bobbing on the wave */}
+        <div className="absolute bottom-4 left-0 w-full pointer-events-none">
+          <div className="surfer-track relative inline-block">
+            {/* Surfboard under his feet */}
+            <svg
+              width="96"
+              height="18"
+              viewBox="0 0 96 18"
+              className="absolute left-1/2 -translate-x-1/2 bottom-0 drop-shadow-md"
+              aria-hidden
+            >
+              <ellipse cx="48" cy="10" rx="44" ry="7" fill="#cd6028" stroke="#a44a1e" strokeWidth="1.5" />
+              <ellipse cx="48" cy="8" rx="38" ry="3" fill="#fff" opacity="0.45" />
+              <circle cx="48" cy="10" r="1.5" fill="#a44a1e" />
             </svg>
+            {/* Paloma Man riding the board */}
+            <img
+              src="/api/mascot/paloma?v=2"
+              alt=""
+              width={72}
+              height={72}
+              className="relative block drop-shadow-lg"
+              style={{ width: 72, height: 72, objectFit: "contain" }}
+            />
           </div>
         </div>
       </div>
