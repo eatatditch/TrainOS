@@ -18,6 +18,7 @@ import {
   Info,
 } from "lucide-react";
 import { PalomaMan } from "@/components/paloma-man";
+import { SurfingLoader } from "@/components/surfing-loader";
 
 interface SearchResult {
   id: string;
@@ -193,6 +194,10 @@ export default function SearchPage() {
             ))}
           </div>
         </div>
+      )}
+
+      {searched && loading && (
+        <SurfingLoader />
       )}
 
       {searched && !loading && recipe && (
