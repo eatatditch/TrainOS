@@ -157,10 +157,13 @@ export default function SpecOSPage() {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [listening, setListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
   const [definitions, setDefinitions] = useState<Definition[]>([]);
   const [expandedDef, setExpandedDef] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
+  const transcriptRef = useRef<string>("");
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const supabase = createClient();
@@ -226,6 +229,11 @@ export default function SpecOSPage() {
     if (user && "serviceWorker" in navigator) {
       navigator.serviceWorker.register("/specos-sw.js").catch(() => {});
     }
+    // Feature-detect Web Speech API so we only show the mic if it works.
+    if (typeof window !== "undefined") {
+      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      setVoiceSupported(!!SR);
+    }
   }, [user]);
 
   const clearSearch = () => {
@@ -247,7 +255,11 @@ export default function SpecOSPage() {
   };
 
   const toggleVoice = () => {
+    // Already listening — user tapped to cancel. Abort without searching.
     if (listening) {
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+      transcriptRef.current = "";
       recognitionRef.current?.abort();
       recognitionRef.current = null;
       setListening(false);
@@ -260,35 +272,75 @@ export default function SpecOSPage() {
 
     try {
       const recognition = new SpeechRecognition();
+      // Continuous + interim = we keep listening and stream live transcript
+      // into the input. We detect "they stopped speaking" ourselves via a
+      // silence timer, which feels more natural than Chrome's default
+      // ~1s auto-stop on a single pause.
       recognition.lang = "en-US";
-      recognition.interimResults = false;
-      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.continuous = true;
       recognition.maxAlternatives = 1;
       recognitionRef.current = recognition;
+      transcriptRef.current = "";
+
+      const SILENCE_MS = 1500; // wait 1.5s of silence before firing the search
+
+      const armSilenceTimer = () => {
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = setTimeout(() => {
+          // They've stopped speaking. Stop recognition — onend handles the
+          // actual search so we never double-fire.
+          recognition.stop();
+        }, SILENCE_MS);
+      };
 
       recognition.onresult = (event: any) => {
-        const last = event.results[event.results.length - 1];
-        if (last?.isFinal) {
-          const transcript = last[0].transcript;
-          setQuery(transcript);
-          // Voice is hands-free — run the search immediately instead of
-          // making the user hit Enter.
-          doSearch(transcript);
+        let finalText = "";
+        let interimText = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i];
+          if (result.isFinal) {
+            finalText += result[0].transcript;
+          } else {
+            interimText += result[0].transcript;
+          }
+        }
+        if (finalText) {
+          transcriptRef.current = (transcriptRef.current + " " + finalText).trim();
+        }
+        const display = (transcriptRef.current + " " + interimText).trim();
+        setQuery(display);
+        armSilenceTimer();
+      };
+
+      recognition.onspeechstart = () => armSilenceTimer();
+
+      recognition.onend = () => {
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+        recognitionRef.current = null;
+        setListening(false);
+        const final = transcriptRef.current.trim();
+        transcriptRef.current = "";
+        if (final) {
+          setQuery(final);
+          doSearch(final);
         }
       };
 
-      recognition.onend = () => {
-        recognitionRef.current = null;
-        setListening(false);
-      };
-
       recognition.onerror = () => {
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
         recognitionRef.current = null;
+        transcriptRef.current = "";
         setListening(false);
       };
 
       recognition.start();
       setListening(true);
+      // Start the silence timer immediately — if they never speak, we stop
+      // after SILENCE_MS and do nothing (transcriptRef is empty).
+      armSilenceTimer();
     } catch {
       setListening(false);
     }
@@ -341,16 +393,50 @@ export default function SpecOSPage() {
               enterKeyHint="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search or ask a question..."
-              className="w-full pl-12 pr-12 py-4 rounded-2xl bg-gray-900 border border-gray-800 text-white placeholder-gray-600 focus:border-ditch-orange focus:ring-0 focus:outline-none text-base"
+              placeholder={listening ? "Listening... speak your question" : "Search or ask a question..."}
+              className={`w-full pl-12 py-4 rounded-2xl bg-gray-900 border text-white placeholder-gray-600 focus:ring-0 focus:outline-none text-base transition-colors ${
+                listening
+                  ? "border-ditch-orange pr-24 placeholder-ditch-orange/80"
+                  : "border-gray-800 focus:border-ditch-orange pr-24"
+              }`}
             />
-            {loading && <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-ditch-orange animate-spin" />}
-            {query && !loading && (
-              <button type="button" onClick={clearSearch} className="absolute right-4 top-1/2 -translate-y-1/2 p-1 hover:bg-gray-800 rounded-full">
-                <X className="w-4 h-4 text-gray-500" />
-              </button>
-            )}
+
+            {/* Right-side button stack: mic + loader/clear */}
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              {voiceSupported && (
+                <button
+                  type="button"
+                  onClick={toggleVoice}
+                  aria-label={listening ? "Stop listening" : "Ask by voice"}
+                  title={listening ? "Stop listening" : "Ask by voice"}
+                  className={`p-2 rounded-full transition-colors ${
+                    listening
+                      ? "bg-ditch-orange text-white animate-pulse"
+                      : "text-gray-400 hover:text-ditch-orange hover:bg-gray-800"
+                  }`}
+                >
+                  {listening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                </button>
+              )}
+              {loading && <Loader2 className="w-5 h-5 text-ditch-orange animate-spin mr-2" />}
+              {!loading && !listening && query && (
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  aria-label="Clear"
+                  className="p-2 hover:bg-gray-800 rounded-full text-gray-500"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </form>
+
+          {listening && (
+            <p className="mt-2 text-center text-xs text-ditch-orange animate-pulse">
+              Listening — pause for a moment when you're done and I'll search.
+            </p>
+          )}
         </div>
 
         {!searched && (
