@@ -145,23 +145,34 @@ export default function SearchPage() {
     }
   }, []);
 
-  useEffect(() => {
-    const timer = setTimeout(() => doSearch(query), 400);
-    return () => clearTimeout(timer);
-  }, [query, doSearch]);
+  // Click-to-search helper used by suggestion chips and AI follow-up items.
+  // Sets the query and triggers the search without waiting for the user to
+  // hit Enter again.
+  const runSearch = (q: string) => {
+    setQuery(q);
+    doSearch(q);
+  };
 
   return (
     <div className="space-y-6 max-w-3xl mx-auto">
       <div className="text-center">
         <h1 className="text-2xl font-bold text-gray-900">Search & Knowledge Center</h1>
-        <p className="text-gray-500 mt-1">Ask anything about Ditch operations, recipes, menu, or allergens.</p>
+        <p className="text-gray-500 mt-1">Type a question, then hit Enter — the search runs on submit, not while you type.</p>
       </div>
 
-      <div className="relative">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          doSearch(query);
+          inputRef.current?.blur();
+        }}
+        className="relative"
+      >
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
         <input
           ref={inputRef}
-          type="text"
+          type="search"
+          enterKeyHint="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={`Try "Baja Fish Taco", "What is gluten-free?", or "recipe for a Mojito"...`}
@@ -171,7 +182,7 @@ export default function SearchPage() {
         {loading && (
           <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 animate-spin" />
         )}
-      </div>
+      </form>
 
       {!searched && (
         <div>
@@ -193,7 +204,7 @@ export default function SearchPage() {
             ].map((q) => (
               <button
                 key={q}
-                onClick={() => setQuery(q)}
+                onClick={() => runSearch(q)}
                 className="px-3 py-1.5 bg-gray-100 rounded-full text-sm text-gray-600 hover:bg-ditch-orange/10 hover:text-ditch-orange transition-colors"
               >
                 {q}
@@ -384,7 +395,7 @@ export default function SearchPage() {
             {foodList.items.map((item) => (
               <button
                 key={item.name}
-                onClick={() => setQuery(item.name)}
+                onClick={() => runSearch(item.name)}
                 className="text-left p-4 bg-white border border-gray-200 rounded-xl hover:border-ditch-orange"
               >
                 <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">{item.category}</p>
@@ -440,7 +451,7 @@ export default function SearchPage() {
                 {aiAnswer.items.map((item) => (
                   <button
                     key={item}
-                    onClick={() => setQuery(item)}
+                    onClick={() => runSearch(item)}
                     className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-full text-xs font-medium"
                   >
                     {item}
