@@ -120,6 +120,9 @@ export default function SearchPage() {
     }
     setLoading(true);
     setSearched(true);
+    // Always keep the loader visible for at least 5s so the Paloma surfer
+    // gets his moment even when the API responds quickly.
+    const start = Date.now();
     try {
       const res = await fetch(`/api/search/answer?q=${encodeURIComponent(q)}`);
       if (res.ok) {
@@ -134,6 +137,10 @@ export default function SearchPage() {
     } catch {
       // silent
     } finally {
+      const elapsed = Date.now() - start;
+      if (elapsed < 5000) {
+        await new Promise((r) => setTimeout(r, 5000 - elapsed));
+      }
       setLoading(false);
     }
   }, []);
