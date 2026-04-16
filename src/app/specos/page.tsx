@@ -216,11 +216,10 @@ export default function SpecOSPage() {
     }
   }, []);
 
-  useEffect(() => {
-    if (listening) return;
-    const timer = setTimeout(() => doSearch(query), 350);
-    return () => clearTimeout(timer);
-  }, [query, doSearch, listening]);
+  const runSearch = (q: string) => {
+    setQuery(q);
+    doSearch(q);
+  };
 
   useEffect(() => {
     if (user) inputRef.current?.focus();
@@ -270,7 +269,11 @@ export default function SpecOSPage() {
       recognition.onresult = (event: any) => {
         const last = event.results[event.results.length - 1];
         if (last?.isFinal) {
-          setQuery(last[0].transcript);
+          const transcript = last[0].transcript;
+          setQuery(transcript);
+          // Voice is hands-free — run the search immediately instead of
+          // making the user hit Enter.
+          doSearch(transcript);
         }
       };
 
@@ -330,7 +333,7 @@ export default function SpecOSPage() {
             </div>
           )}
 
-          <form onSubmit={(e) => { e.preventDefault(); inputRef.current?.blur(); }} className="relative">
+          <form onSubmit={(e) => { e.preventDefault(); doSearch(query); inputRef.current?.blur(); }} className="relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
             <input
               ref={inputRef}
@@ -367,7 +370,7 @@ export default function SpecOSPage() {
               ].map((q) => (
                 <button
                   key={q.label}
-                  onClick={() => setQuery(q.label)}
+                  onClick={() => runSearch(q.label)}
                   className="px-3 py-1.5 bg-gray-900 border border-gray-800 rounded-full text-sm text-gray-400 hover:border-ditch-orange hover:text-ditch-orange transition-colors flex items-center gap-1.5"
                 >
                   <span>{q.icon}</span>
@@ -565,7 +568,7 @@ export default function SpecOSPage() {
               {foodList.items.map((item) => (
                 <button
                   key={item.name}
-                  onClick={() => setQuery(item.name)}
+                  onClick={() => runSearch(item.name)}
                   className="text-left p-4 bg-gray-900 border border-gray-800 rounded-xl hover:border-ditch-orange transition-colors"
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -624,7 +627,7 @@ export default function SpecOSPage() {
                     {aiAnswer.items.map((item) => (
                       <button
                         key={item}
-                        onClick={() => setQuery(item)}
+                        onClick={() => runSearch(item)}
                         className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-full text-xs font-medium transition-colors"
                       >
                         {item}
