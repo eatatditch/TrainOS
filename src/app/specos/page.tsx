@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Search, Loader2, AlertTriangle, X, Sparkles, Zap, LogOut, Mic, MicOff, Utensils, CheckCircle2, Leaf, Brain, Info, BookOpen } from "lucide-react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { SurfingLoader } from "@/components/surfing-loader";
 
 interface Recipe {
   name: string;
@@ -367,6 +368,12 @@ export default function SpecOSPage() {
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {searched && loading && (
+          <div className="mt-6 mb-8">
+            <SurfingLoader dark />
           </div>
         )}
 
