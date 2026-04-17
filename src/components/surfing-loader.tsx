@@ -87,7 +87,7 @@ export function SurfingLoader({ dark = false, message }: SurfingLoaderProps) {
         </svg>
 
         {/* Paloma Man — surfs across the whole wave, lands a backflip, rides back */}
-        <div className="absolute bottom-4 left-0 right-0 h-20 pointer-events-none overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none">
           <div className="surfer-track">
             {/* Surfboard under his feet */}
             <svg
@@ -132,7 +132,7 @@ export function SurfingLoader({ dark = false, message }: SurfingLoaderProps) {
       <style jsx>{`
         .surfer-track {
           position: absolute;
-          bottom: 0;
+          bottom: 16px;
           left: 0;
           width: 72px;
           height: 72px;
@@ -143,18 +143,18 @@ export function SurfingLoader({ dark = false, message }: SurfingLoaderProps) {
         @keyframes surf-x {
           /* ride out to the right, bobbing on the wave */
           0%   { left: 2%;  transform: translateY(0)     rotate(-4deg); }
-          12%  { left: 18%; transform: translateY(-4px)  rotate(3deg); }
-          24%  { left: 36%; transform: translateY(-2px)  rotate(-3deg); }
-          36%  { left: 56%; transform: translateY(-5px)  rotate(4deg); }
-          42%  { left: 72%; transform: translateY(-3px)  rotate(-2deg); }
+          12%  { left: 16%; transform: translateY(-4px)  rotate(3deg); }
+          24%  { left: 34%; transform: translateY(-2px)  rotate(-3deg); }
+          36%  { left: 54%; transform: translateY(-5px)  rotate(4deg); }
+          42%  { left: 68%; transform: translateY(-3px)  rotate(-2deg); }
           /* launch off the lip and spin a full backflip */
-          46%  { left: 80%; transform: translateY(-22px) rotate(140deg); }
-          50%  { left: 84%; transform: translateY(-38px) rotate(360deg); }
-          54%  { left: 80%; transform: translateY(-22px) rotate(580deg); }
-          58%  { left: 74%; transform: translateY(0)     rotate(716deg); }
+          46%  { left: 76%; transform: translateY(-16px) rotate(140deg); }
+          50%  { left: 80%; transform: translateY(-26px) rotate(360deg); }
+          54%  { left: 76%; transform: translateY(-16px) rotate(580deg); }
+          58%  { left: 70%; transform: translateY(0)     rotate(716deg); }
           /* carve back across the set */
-          72%  { left: 50%; transform: translateY(-4px)  rotate(724deg); }
-          84%  { left: 26%; transform: translateY(-2px)  rotate(714deg); }
+          72%  { left: 46%; transform: translateY(-4px)  rotate(724deg); }
+          84%  { left: 22%; transform: translateY(-2px)  rotate(714deg); }
           100% { left: 2%;  transform: translateY(0)     rotate(720deg); }
         }
       `}</style>
