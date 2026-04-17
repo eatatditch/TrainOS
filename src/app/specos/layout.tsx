@@ -12,13 +12,13 @@ export const metadata: Metadata = {
   },
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "default",
     title: "SpecOS",
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#030712",
+  themeColor: "#cd6028",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
@@ -27,7 +27,7 @@ export const viewport: Viewport = {
 
 export default function SpecOSLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-gray-950">
+    <div className="min-h-screen bg-gray-50">
       {children}
     </div>
   );

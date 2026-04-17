@@ -4,7 +4,7 @@
   "description": "Instant cocktail specs, recipes, and operational answers for Ditch team members",
   "start_url": "/specos",
   "display": "standalone",
-  "background_color": "#030712",
+  "background_color": "#f9fafb",
   "theme_color": "#cd6028",
   "orientation": "portrait",
   "icons": [
