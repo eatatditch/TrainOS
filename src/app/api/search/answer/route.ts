@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { askLLM, shouldUseLLM } from "@/lib/llm";
 
+export const maxDuration = 30;
+
 const ALLERGEN_PATTERNS: Record<string, RegExp> = {
   gluten: /\b(gluten|wheat|celiac)\b/i,
   dairy: /\b(dairy|milk|lactose|cheese)\b/i,
@@ -143,6 +145,26 @@ export async function GET(request: NextRequest) {
 
   const queryLower = query.toLowerCase();
   const searchTerms = queryLower.split(/\s+/).filter((t) => t.length > 2);
+
+  // Fast-track: company/location/contact questions go straight to LLM.
+  const isCompanyQuery =
+    /\b(address|phone\s*(number)?|location|owner|catering|email|donate|donation|founded|opened|how\s+many\s+locations|who\s+owns|tracy|bay\s*shore|port\s*jeff)/i.test(
+      query
+    ) && shouldUseLLM(query);
+  if (isCompanyQuery) {
+    console.log("[search] company query detected, fast-tracking to LLM");
+    const llmAnswer = await askLLM(query);
+    if (llmAnswer) {
+      return NextResponse.json({
+        answer: null,
+        recipe: null,
+        foodItem: null,
+        foodList: null,
+        aiAnswer: llmAnswer,
+        results: [],
+      });
+    }
+  }
 
   const cleaned = queryLower
     .replace(/how do (i|you) make (a |an |the )?/gi, "")
