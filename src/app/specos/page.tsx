@@ -1,1 +1,1 @@
-            <SurfingLoader />
+RESTORE_PLACEHOLDER
