@@ -7,17 +7,18 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Modal } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
-import { Select } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   Plus, Edit2, Trash2, Route, BookOpen, Users,
 } from "lucide-react";
+import { POSITIONS, POSITION_DEPARTMENTS, type Position } from "@/lib/positions";
 
 interface TrainingPath {
   id: string;
   title: string;
   description: string;
   targetRole: string;
+  targetPositions: string[];
   moduleIds: string[];
   modules: { id: string; title: string; sortOrder: number }[];
   assignedCount: number;
@@ -31,8 +32,14 @@ interface Module {
 const emptyForm = {
   title: "",
   description: "",
-  targetRole: "",
+  targetPositions: [] as string[],
   moduleIds: [] as string[],
+};
+
+const POSITIONS_BY_DEPT: Record<"FOH" | "BOH" | "Management", Position[]> = {
+  FOH: POSITIONS.filter((p) => POSITION_DEPARTMENTS[p] === "FOH"),
+  BOH: POSITIONS.filter((p) => POSITION_DEPARTMENTS[p] === "BOH"),
+  Management: POSITIONS.filter((p) => POSITION_DEPARTMENTS[p] === "Management"),
 };
 
 export default function PathsPage() {
@@ -61,7 +68,7 @@ export default function PathsPage() {
 
   const openNew = () => {
     setEditing(null);
-    setForm({ ...emptyForm, moduleIds: [] });
+    setForm({ ...emptyForm, targetPositions: [], moduleIds: [] });
     setShowModal(true);
   };
 
@@ -70,10 +77,17 @@ export default function PathsPage() {
     setForm({
       title: path.title,
       description: path.description,
-      targetRole: path.targetRole,
+      targetPositions: path.targetPositions || [],
       moduleIds: path.moduleIds || path.modules.map((m) => m.id),
     });
     setShowModal(true);
+  };
+
+  const togglePosition = (position: string) => {
+    const next = form.targetPositions.includes(position)
+      ? form.targetPositions.filter((p) => p !== position)
+      : [...form.targetPositions, position];
+    setForm({ ...form, targetPositions: next });
   };
 
   const handleSave = async () => {
@@ -104,15 +118,6 @@ export default function PathsPage() {
       : [...form.moduleIds, moduleId];
     setForm({ ...form, moduleIds: ids });
   };
-
-  const roleOptions = [
-    { value: "", label: "-- Select Role --" },
-    { value: "EMPLOYEE", label: "Employee" },
-    { value: "MANAGER", label: "Manager" },
-    { value: "ADMIN", label: "Admin" },
-    { value: "TRAINER", label: "Trainer" },
-    { value: "ALL", label: "All Roles" },
-  ];
 
   if (loading) {
     return (
@@ -175,11 +180,15 @@ export default function PathsPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-4 mb-4 text-sm">
-                <div className="flex items-center gap-1 text-gray-500">
-                  <Badge>{path.targetRole || "All Roles"}</Badge>
-                </div>
-                <div className="flex items-center gap-1 text-gray-500">
+              <div className="flex flex-wrap items-center gap-2 mb-4 text-sm">
+                {path.targetPositions && path.targetPositions.length > 0 ? (
+                  path.targetPositions.map((pos) => (
+                    <Badge key={pos}>{pos}</Badge>
+                  ))
+                ) : (
+                  <Badge variant="optional">Any position</Badge>
+                )}
+                <div className="flex items-center gap-1 text-gray-500 ml-1">
                   <BookOpen className="w-4 h-4" />
                   <span>{path.modules.length} modules</span>
                 </div>
@@ -231,12 +240,44 @@ export default function PathsPage() {
             onChange={(e) => setForm({ ...form, description: e.target.value })}
             placeholder="What is this training path about?"
           />
-          <Select
-            label="Target Role"
-            value={form.targetRole}
-            onChange={(e) => setForm({ ...form, targetRole: e.target.value })}
-            options={roleOptions}
-          />
+          {/* Target Positions */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Target Positions{" "}
+              <span className="text-gray-400 font-normal">
+                ({form.targetPositions.length} selected — leave empty for any position)
+              </span>
+            </label>
+            <div className="space-y-3 border border-gray-200 rounded-lg p-3">
+              {(["FOH", "BOH", "Management"] as const).map((dept) => (
+                <div key={dept}>
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                    {dept}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {POSITIONS_BY_DEPT[dept].map((pos) => {
+                      const selected = form.targetPositions.includes(pos);
+                      return (
+                        <button
+                          key={pos}
+                          type="button"
+                          onClick={() => togglePosition(pos)}
+                          className={
+                            "px-2.5 py-1 rounded-full text-xs font-medium border transition-colors " +
+                            (selected
+                              ? "bg-ditch-orange text-white border-ditch-orange"
+                              : "bg-white text-gray-700 border-gray-200 hover:border-ditch-orange hover:text-ditch-orange")
+                          }
+                        >
+                          {pos}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
 
           {/* Module Selection */}
           <div>

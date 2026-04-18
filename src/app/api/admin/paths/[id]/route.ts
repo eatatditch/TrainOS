@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { isPosition } from "@/lib/positions";
+
+function sanitizePositions(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return Array.from(new Set(input.filter(isPosition)));
+}
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getUser();
@@ -11,14 +17,17 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
   const data = await request.json();
 
+  const update: Record<string, unknown> = {
+    title: data.title,
+    description: data.description,
+    isActive: data.isActive,
+    targetPositions: sanitizePositions(data.targetPositions),
+  };
+  if (typeof data.targetRole === "string") update.targetRole = data.targetRole;
+
   const { data: path, error } = await db
     .from("TrainingPath")
-    .update({
-      title: data.title,
-      description: data.description,
-      targetRole: data.targetRole,
-      isActive: data.isActive,
-    })
+    .update(update)
     .eq("id", id)
     .select()
     .single();

@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { isPosition } from "@/lib/positions";
+
+function sanitizePositions(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return Array.from(new Set(input.filter(isPosition)));
+}
 
 export async function GET() {
   const { data: paths } = await db
@@ -43,6 +49,7 @@ export async function POST(request: NextRequest) {
       title: data.title,
       description: data.description || "",
       targetRole: data.targetRole || "",
+      targetPositions: sanitizePositions(data.targetPositions),
       isActive: true,
     })
     .select()
