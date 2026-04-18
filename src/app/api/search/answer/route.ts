@@ -23,6 +23,19 @@ const DIETARY_PATTERNS: Record<string, RegExp> = {
   pescatarian: /\bpescatarian\b/i,
 };
 
+// Category names (lowercased) must match the tag written by
+// /api/admin/menu's buildTags() — i.e. item.category.toLowerCase().
+const CATEGORY_PATTERNS: Record<string, RegExp> = {
+  kids: /\b(kids?|kiddos?|children('s)?|kid's)\b/i,
+  tacos: /\btacos?\b/i,
+  bowls: /\bbowls?\b/i,
+  starters: /\b(starters?|appetizers?|apps)\b/i,
+  platos: /\b(platos|plates)\b/i,
+  handhelds: /\b(handhelds?|sandwich(es)?|burgers?)\b/i,
+  dessert: /\b(desserts?|sweets?)\b/i,
+  sides: /\bsides?\b/i,
+};
+
 function detectAllergen(q: string): string | null {
   for (const [name, re] of Object.entries(ALLERGEN_PATTERNS)) {
     if (re.test(q)) return name;
@@ -35,6 +48,14 @@ function detectDietary(q: string): string | null {
     if (re.test(q)) return name;
   }
   return null;
+}
+
+function detectCategories(q: string): string[] {
+  const found: string[] = [];
+  for (const [name, re] of Object.entries(CATEGORY_PATTERNS)) {
+    if (re.test(q)) found.push(name);
+  }
+  return found;
 }
 
 async function augmentFoodItem(foodItemId: string, base: any): Promise<any> {
@@ -188,9 +209,10 @@ export async function GET(request: NextRequest) {
   const isListQuery = !isExplanationQuery && listIntentPattern.test(query);
   const targetDietary = detectDietary(query);
   const targetAllergen = detectAllergen(query);
+  const targetCategories = detectCategories(query);
 
-  // ─── Step 1: Dietary/Allergen List Queries ─────────────────────────────────
-  if (isListQuery && (targetDietary || targetAllergen)) {
+  // ─── Step 1: Dietary/Allergen/Category List Queries ────────────────────────
+  if (isListQuery && (targetDietary || targetAllergen || targetCategories.length > 0)) {
     const { data: allFood } = await db
       .from("SearchIndex")
       .select("*")
@@ -198,6 +220,9 @@ export async function GET(request: NextRequest) {
 
     const tagMatches = (allFood || []).filter((item: any) => {
       const tagSet = new Set((item.tags || []).map((t: string) => t.toLowerCase()));
+      if (targetCategories.length > 0 && !targetCategories.every((c) => tagSet.has(c))) {
+        return false;
+      }
       if (targetDietary) {
         if (targetDietary === "vegan") return tagSet.has("vegan");
         if (targetDietary === "vegetarian")
@@ -212,7 +237,7 @@ export async function GET(request: NextRequest) {
       if (targetAllergen) {
         return !tagSet.has(`contains-${targetAllergen}`);
       }
-      return false;
+      return targetCategories.length > 0;
     });
 
     const excludedAllergen =
@@ -244,16 +269,21 @@ export async function GET(request: NextRequest) {
 
     if (matches.length > 0) {
       const items = matches.map((m: any) => parseFoodItem(m.title, m.content, m.tags));
+      const categoryLabel = targetCategories.join(" ");
+      const label = targetCategories.length > 0
+        ? (targetDietary
+            ? `${targetDietary.replace(/-/g, " ")} ${categoryLabel} items`
+            : targetAllergen
+            ? `${categoryLabel} items without ${targetAllergen}`
+            : `${categoryLabel} menu`)
+        : targetDietary
+        ? targetDietary.replace(/-/g, " ") + " items"
+        : `items without ${targetAllergen}`;
       return NextResponse.json({
         answer: null,
         recipe: null,
         foodItem: null,
-        foodList: {
-          label: targetDietary
-            ? targetDietary.replace(/-/g, " ") + " items"
-            : `items without ${targetAllergen}`,
-          items,
-        },
+        foodList: { label, items },
         results: [],
       });
     }
