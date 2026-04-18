@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/server";
 import { db } from "@/lib/db";
+import { assignPathsForPosition } from "@/lib/assignPaths";
 
 export async function GET(request: NextRequest) {
   const user = await getUser();
@@ -102,9 +103,13 @@ export async function POST(request: NextRequest) {
         userId: newUser.id,
         trainingPathId: pathId,
         dueDate: data.dueDate || null,
+        assignedReason: "manual",
       }))
     );
   }
+
+  // Fan out position-driven paths + module assignments from hireDate.
+  await assignPathsForPosition(newUser.id, newUser.position, newUser.hireDate, adminUser.id);
 
   return NextResponse.json({ id: newUser.id, email: newUser.email, firstName: newUser.firstName, lastName: newUser.lastName });
 }

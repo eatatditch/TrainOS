@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/server";
 import { db } from "@/lib/db";
+import { assignPathsForPosition } from "@/lib/assignPaths";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const currentUser = await getUser();
@@ -50,16 +51,16 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
   const data = await request.json();
 
-  if (data.password) {
-    const { data: existingUser } = await db
-      .from("User")
-      .select("authId")
-      .eq("id", id)
-      .single();
+  const { data: priorUser } = await db
+    .from("User")
+    .select("authId, position, hireDate")
+    .eq("id", id)
+    .single();
 
-    if (existingUser?.authId) {
+  if (data.password) {
+    if (priorUser?.authId) {
       const supabaseAdmin = await createAdminClient();
-      await supabaseAdmin.auth.admin.updateUserById(existingUser.authId, { password: data.password });
+      await supabaseAdmin.auth.admin.updateUserById(priorUser.authId, { password: data.password });
     }
   }
 
@@ -82,6 +83,22 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // If position changed (including being newly set), fan out position-driven
+  // paths. Existing assignments from the prior position stay put.
+  if (
+    data.position !== undefined &&
+    (updatedUser.position ?? null) !== (priorUser?.position ?? null) &&
+    updatedUser.position
+  ) {
+    await assignPathsForPosition(
+      updatedUser.id,
+      updatedUser.position,
+      updatedUser.hireDate ?? priorUser?.hireDate ?? null,
+      adminUser.id,
+    );
+  }
+
   return NextResponse.json({ id: updatedUser.id, email: updatedUser.email, firstName: updatedUser.firstName, lastName: updatedUser.lastName });
 }
 

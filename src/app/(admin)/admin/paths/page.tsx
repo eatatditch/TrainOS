@@ -56,8 +56,8 @@ export default function PathsPage() {
 
   const fetchData = async () => {
     const [pathRes, modRes] = await Promise.all([
-      fetch("/api/admin/paths"),
-      fetch("/api/admin/modules"),
+      fetch("/api/admin/paths", { cache: "no-store" }),
+      fetch("/api/admin/modules", { cache: "no-store" }),
     ]);
     const pathData = await pathRes.json();
     const modData = await modRes.json();
@@ -94,11 +94,17 @@ export default function PathsPage() {
     const method = editing ? "PUT" : "POST";
     const url = editing ? `/api/admin/paths/${editing.id}` : "/api/admin/paths";
 
-    await fetch(url, {
+    const res = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      alert(`Save failed: ${body.error || res.statusText}`);
+      return;
+    }
 
     setShowModal(false);
     setEditing(null);
