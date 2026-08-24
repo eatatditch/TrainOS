@@ -93,11 +93,11 @@ export default async function QuizzesPage() {
   const [quizzesResult, attemptsResult, completionsResult] = await Promise.all([
     db
       .from("Quiz")
-      .select("*, module:Module(title, isActive, section:Section(title, isActive)), section:Section(title, isActive), questions:QuizQuestion(id), coverage:QuizModuleCoverage(moduleId, sortOrder)")
+      .select("*, module:Module!Quiz_moduleId_fkey(title, isActive, section:Section(title, isActive)), section:Section(title, isActive), questions:QuizQuestion(id), coverage:QuizModuleCoverage(moduleId, sortOrder)")
       .eq("isActive", true),
     db
       .from("QuizAttempt")
-      .select("id, quizId, assessmentVersion, score, passed, completedAt, quiz:Quiz(title, quizType, isActive, assessmentVersion, module:Module(title))")
+      .select("id, quizId, assessmentVersion, score, passed, completedAt, quiz:Quiz(title, quizType, isActive, assessmentVersion, module:Module!Quiz_moduleId_fkey(title))")
       .eq("userId", user.id)
       .order("completedAt", { ascending: false }),
     db

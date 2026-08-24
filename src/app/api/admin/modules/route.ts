@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
 
   let query = db
     .from("Module")
-    .select("*, section:Section(*), quiz:Quiz(*), assets:ModuleAsset(*)")
+    .select("*, section:Section(*), quiz:Quiz!Quiz_moduleId_fkey(*), assets:ModuleAsset(*)")
     .order("sortOrder");
 
   if (sectionId) {

@@ -30,7 +30,7 @@ export default async function DashboardPage() {
   const [assignmentsResult, completionsResult, quizAttemptsResult, announcementsResult] = await Promise.all([
     db.from("ModuleAssignment").select("*, module:Module(*, section:Section(*))").eq("userId", userId).eq("isActive", true).order("dueDate"),
     db.from("ModuleCompletion").select("*").eq("userId", userId),
-    db.from("QuizAttempt").select("*, quiz:Quiz(*, module:Module(*, section:Section(*)))").eq("userId", userId).order("completedAt", { ascending: false }).limit(20),
+    db.from("QuizAttempt").select("*, quiz:Quiz(*, module:Module!Quiz_moduleId_fkey(*, section:Section(*)))").eq("userId", userId).order("completedAt", { ascending: false }).limit(20),
     db.from("Announcement").select("*").eq("isActive", true).or("expiresAt.is.null,expiresAt.gte." + new Date().toISOString()).order("createdAt", { ascending: false }).limit(5),
   ]);
 

@@ -12,7 +12,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const { data: mod } = await db
     .from("Module")
-    .select("*, section:Section(*), quiz:Quiz(*, questions:QuizQuestion(*)), assets:ModuleAsset(*)")
+    .select("*, section:Section(*), quiz:Quiz!Quiz_moduleId_fkey(*, questions:QuizQuestion(*)), assets:ModuleAsset(*)")
     .eq("id", id)
     .single();
 

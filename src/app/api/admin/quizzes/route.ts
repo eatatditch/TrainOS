@@ -110,7 +110,7 @@ export async function GET() {
   const { data: quizzes, error } = await db
     .from("Quiz")
     .select(
-      "*, module:Module(*, section:Section(*)), section:Section(*), questions:QuizQuestion(*)",
+      "*, module:Module!Quiz_moduleId_fkey(*, section:Section(*)), section:Section(*), questions:QuizQuestion(*)",
     )
     .order("isActive", { ascending: false })
     .order("title", { ascending: true });

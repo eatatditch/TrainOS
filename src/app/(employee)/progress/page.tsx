@@ -18,7 +18,7 @@ export default async function ProgressPage() {
   const [assignmentsResult, completionsResult, quizAttemptsResult, pathsResult, signoffsResult] = await Promise.all([
     db.from("ModuleAssignment").select("*, module:Module(*, section:Section(*))").eq("userId", userId).eq("isActive", true).order("dueDate"),
     db.from("ModuleCompletion").select("*, module:Module(*, section:Section(*))").eq("userId", userId).order("completedAt", { ascending: false }),
-    db.from("QuizAttempt").select("*, quiz:Quiz(*, module:Module(*, section:Section(*)))").eq("userId", userId),
+    db.from("QuizAttempt").select("*, quiz:Quiz(*, module:Module!Quiz_moduleId_fkey(*, section:Section(*)))").eq("userId", userId),
     db.from("UserTrainingPath").select("*, trainingPath:TrainingPath(*, modules:TrainingPathModule(*, module:Module(*, section:Section(*))))").eq("userId", userId).eq("isActive", true),
     db.from("PracticalSignoff").select("moduleId, status, nextAuditAt, auditLog").eq("userId", userId),
   ]);

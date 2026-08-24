@@ -27,7 +27,7 @@ export default async function TakeQuizPage({ params }: { params: Promise<{ quizI
 
   const { data: quiz, error: quizError } = await db
     .from("Quiz")
-    .select("*, questions:QuizQuestion(*), module:Module(*, section:Section(*)), section:Section(*)")
+    .select("*, questions:QuizQuestion(*), module:Module!Quiz_moduleId_fkey(*, section:Section(*)), section:Section(*)")
     .eq("id", quizId)
     .single();
 

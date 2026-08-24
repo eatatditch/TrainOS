@@ -130,7 +130,7 @@ export async function GET(request: NextRequest) {
   if (type === "all" || type === "quiz") {
     const { data: quizzes } = await db
       .from("Quiz")
-      .select("*, module:Module(*, section:Section(*)), section:Section(*), coverage:QuizModuleCoverage(moduleId)")
+      .select("*, module:Module!Quiz_moduleId_fkey(*, section:Section(*)), section:Section(*), coverage:QuizModuleCoverage(moduleId)")
       .eq("isActive", true)
       .or(`title.ilike.%${filterQuery}%,description.ilike.%${filterQuery}%`)
       .limit(10);

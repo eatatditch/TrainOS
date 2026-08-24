@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
 
   const { data: quiz, error: quizError } = await db
     .from("Quiz")
-    .select("*, questions:QuizQuestion(*), module:Module(isActive, section:Section(isActive)), section:Section(isActive)")
+    .select("*, questions:QuizQuestion(*), module:Module!Quiz_moduleId_fkey(isActive, section:Section(isActive)), section:Section(isActive)")
     .eq("id", quizId)
     .maybeSingle();
 
