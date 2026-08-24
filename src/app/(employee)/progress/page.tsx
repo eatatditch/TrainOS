@@ -25,7 +25,17 @@ export default async function ProgressPage() {
 
   const assignments = (assignmentsResult.data || []).filter((assignment: any) => assignment.module?.isActive && assignment.module?.section?.isActive);
   const completions = completionsResult.data || [];
-  const quizAttempts = (quizAttemptsResult.data || []).filter((attempt: any) => attempt.quiz?.module?.isActive && attempt.quiz?.module?.section?.isActive);
+  const quizAttempts = (quizAttemptsResult.data || []).filter((attempt: any) => {
+    const quiz = attempt.quiz;
+    if (!quiz?.isActive || attempt.assessmentVersion !== quiz.assessmentVersion) return false;
+    if (quiz.quizType === "MODULE") {
+      return quiz.module?.isActive && quiz.module?.section?.isActive;
+    }
+    if (quiz.quizType === "POSITION_FINAL") {
+      return quiz.position && user.positions.includes(quiz.position);
+    }
+    return quiz.quizType === "SECTION";
+  });
   const paths = (pathsResult.data || [])
     .filter((pathAssignment: any) => pathAssignment.trainingPath?.isActive)
     .map((pathAssignment: any) => ({
@@ -63,7 +73,7 @@ export default async function ProgressPage() {
         <StatCard title="Assigned" value={totalAssigned} icon={BookOpen} />
         <StatCard title="Completed" value={completedCount} icon={CheckCircle2} />
         <StatCard title="Overdue" value={overdueCount} icon={AlertTriangle} />
-        <StatCard title="Avg Quiz Score" value={`${avgScore}%`} icon={ClipboardCheck} />
+        <StatCard title="Assessment Avg" value={`${avgScore}%`} icon={ClipboardCheck} />
       </div>
 
       <Card className="border-l-4 border-l-ditch-orange bg-ditch-sand/20">

@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
     db.from("Module").select("id, tags, section:Section(isActive, slug)").eq("id", moduleId).eq("isActive", true).single(),
     db.from("ModuleAssignment").select("id").eq("userId", userId).eq("moduleId", moduleId).eq("isActive", true).maybeSingle(),
     db.from("ModuleCompletion").select("id").eq("userId", userId).eq("moduleId", moduleId).maybeSingle(),
-    db.from("Quiz").select("id").eq("moduleId", moduleId).eq("isRequired", true),
+    db.from("Quiz").select("id, assessmentVersion").eq("moduleId", moduleId).eq("quizType", "MODULE").eq("isActive", true).eq("isRequired", true),
   ]);
   const parentSection = trainingModule?.section as unknown as {
     isActive?: boolean;
@@ -96,14 +96,24 @@ export async function POST(request: NextRequest) {
   if (requiredQuizIds.length > 0) {
     const { data: passedAttempts, error: attemptsError } = await db
       .from("QuizAttempt")
-      .select("quizId")
+      .select("quizId, assessmentVersion")
       .eq("userId", userId)
       .eq("passed", true)
       .in("quizId", requiredQuizIds);
     if (attemptsError) {
       return NextResponse.json({ error: "Required knowledge checks could not be verified" }, { status: 503 });
     }
-    const passedQuizIds = new Set((passedAttempts || []).map((attempt) => attempt.quizId));
+    const currentVersionByQuiz = new Map(
+      (requiredQuizzesResult.data || []).map((quiz) => [quiz.id, quiz.assessmentVersion]),
+    );
+    const passedQuizIds = new Set(
+      (passedAttempts || [])
+        .filter(
+          (attempt) =>
+            currentVersionByQuiz.get(attempt.quizId) === attempt.assessmentVersion,
+        )
+        .map((attempt) => attempt.quizId),
+    );
     if (requiredQuizIds.some((quizId) => !passedQuizIds.has(quizId))) {
       return NextResponse.json({ error: "Every required knowledge check must be passed before practical certification" }, { status: 400 });
     }

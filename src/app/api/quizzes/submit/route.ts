@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { authorizeApi } from "@/lib/api-auth";
 import {
-  canAccessModule,
-  canManageTraining,
-  getAccessibleSectionModuleIds,
+  getAssessmentReadiness,
+  isQuizType,
+  type AssessmentScope,
 } from "@/lib/training-access";
 import { matchesShortAnswer, normalizeAnswer } from "@/lib/quiz-integrity";
+import { isPosition } from "@/lib/positions";
 
 function isAnswerRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -52,6 +53,7 @@ export async function POST(request: NextRequest) {
   }
   if (!quiz) return NextResponse.json({ error: "Quiz not found" }, { status: 404 });
   if (
+    !quiz.isActive ||
     (quiz.moduleId &&
       (!quiz.module?.isActive || !quiz.module?.section?.isActive)) ||
     (quiz.sectionId && !quiz.section?.isActive)
@@ -67,76 +69,40 @@ export async function POST(request: NextRequest) {
       { status: 409 },
     );
   }
-
-  if (!canManageTraining(user)) {
-    let prerequisiteModuleIds: string[] = [];
-
-    if (quiz.moduleId) {
-      if (!(await canAccessModule(user, quiz.moduleId))) {
-        return NextResponse.json(
-          { error: "This quiz is not part of your assigned training" },
-          { status: 403 },
-        );
-      }
-      prerequisiteModuleIds = [quiz.moduleId];
-    } else if (quiz.sectionId) {
-      prerequisiteModuleIds = await getAccessibleSectionModuleIds(
-        user,
-        quiz.sectionId,
-      );
-      if (prerequisiteModuleIds.length === 0) {
-        return NextResponse.json(
-          { error: "This quiz is not part of your assigned training" },
-          { status: 403 },
-        );
-      }
-    } else {
-      return NextResponse.json(
-        { error: "Standalone quizzes require manager access" },
-        { status: 403 },
-      );
-    }
-
-    const { data: completions, error: completionsError } = await db
-      .from("ModuleCompletion")
-      .select("moduleId")
-      .eq("userId", user.id)
-      .in("moduleId", prerequisiteModuleIds);
-    if (completionsError) {
-      return NextResponse.json(
-        { error: "Unable to verify training completion" },
-        { status: 500 },
-      );
-    }
-    const completedIds = new Set((completions || []).map((row) => row.moduleId));
-    if (prerequisiteModuleIds.some((id) => !completedIds.has(id))) {
-      return NextResponse.json(
-        { error: "Complete the assigned training before taking this quiz" },
-        { status: 409 },
-      );
-    }
-  }
-
-  const { count: attemptCount, error: attemptCountError } = await db
-    .from("QuizAttempt")
-    .select("*", { count: "exact", head: true })
-    .eq("userId", user.id)
-    .eq("quizId", quizId);
-  if (attemptCountError) {
+  if (!isQuizType(quiz.quizType)) {
     return NextResponse.json(
-      { error: "Unable to verify quiz attempts" },
+      { error: "This assessment has an invalid scope" },
       { status: 500 },
     );
   }
 
-  const attemptsBefore = attemptCount || 0;
-  if (quiz.retryLimit > 0 && attemptsBefore >= quiz.retryLimit) {
+  const quizScope: AssessmentScope = {
+    id: quiz.id,
+    quizType: quiz.quizType,
+    moduleId: quiz.moduleId,
+    sectionId: quiz.sectionId,
+    position: isPosition(quiz.position) ? quiz.position : null,
+    assessmentVersion: quiz.assessmentVersion,
+    isActive: quiz.isActive,
+  };
+  let readiness;
+  try {
+    readiness = await getAssessmentReadiness(user, quizScope);
+  } catch {
     return NextResponse.json(
-      {
-        error: "Maximum attempts reached",
-        attemptsRemaining: 0,
-        canRetry: false,
-      },
+      { error: "Unable to verify assessment prerequisites" },
+      { status: 500 },
+    );
+  }
+  if (!readiness.authorized) {
+    return NextResponse.json(
+      { error: readiness.reason || "This assessment is not assigned to you" },
+      { status: 403 },
+    );
+  }
+  if (!readiness.ready) {
+    return NextResponse.json(
+      { error: readiness.reason || "Complete the prerequisites first" },
       { status: 409 },
     );
   }
@@ -179,44 +145,66 @@ export async function POST(request: NextRequest) {
     };
   }
 
-  const score = Math.round((correctCount / quiz.questions.length) * 100);
-  const passed = score >= quiz.passingScore;
-
-  const { data: attempt, error: attemptError } = await db
-    .from("QuizAttempt")
-    .insert({
-      quizId,
-      userId: user.id,
-      score,
-      passed,
-      answers,
-      startedAt: new Date().toISOString(),
-      completedAt: new Date().toISOString(),
-    })
-    .select()
-    .single();
+  const { data: attemptResult, error: attemptError } = await db.rpc(
+    "record_quiz_attempt_atomic",
+    {
+      p_user_id: user.id,
+      p_quiz_id: quizId,
+      p_answers: answers,
+      p_correct_count: correctCount,
+      p_started_at: new Date().toISOString(),
+    },
+  );
 
   if (attemptError) {
+    if (attemptError.message.includes("Maximum attempts reached")) {
+      return NextResponse.json(
+        {
+          error: "Maximum attempts reached",
+          attemptsRemaining: 0,
+          canRetry: false,
+        },
+        { status: 409 },
+      );
+    }
     return NextResponse.json(
       { error: "Unable to save quiz attempt" },
       { status: 500 },
     );
   }
 
-  const attemptsAfter = attemptsBefore + 1;
-  const attemptsRemaining =
-    quiz.retryLimit > 0
-      ? Math.max(0, quiz.retryLimit - attemptsAfter)
-      : null;
-  const canRetry =
-    !passed && (attemptsRemaining === null || attemptsRemaining > 0);
+  const result = (attemptResult || {}) as Record<string, unknown>;
+  if (
+    typeof result.score !== "number" ||
+    typeof result.passed !== "boolean" ||
+    (result.attemptsRemaining !== null &&
+      typeof result.attemptsRemaining !== "number") ||
+    typeof result.canRetry !== "boolean"
+  ) {
+    return NextResponse.json(
+      { error: "The assessment was saved but its result could not be loaded" },
+      { status: 500 },
+    );
+  }
+
+  const revealAnswers =
+    quiz.quizType !== "POSITION_FINAL" || result.passed || !result.canRetry;
+  const clientFeedback = Object.fromEntries(
+    Object.entries(feedback).map(([questionId, item]) => [
+      questionId,
+      revealAnswers
+        ? item
+        : { correct: item.correct, correctAnswer: "", explanation: "" },
+    ]),
+  );
 
   return NextResponse.json({
-    score,
-    passed,
-    feedback,
-    attemptId: attempt?.id,
-    attemptsRemaining,
-    canRetry,
+    score: result.score,
+    passed: result.passed,
+    feedback: clientFeedback,
+    attemptId: result.attemptId,
+    attemptsRemaining: result.attemptsRemaining,
+    canRetry: result.canRetry,
+    revealAnswers,
   });
 }

@@ -4,6 +4,9 @@ const QUESTION_TYPES = [
   "SHORT_ANSWER",
 ] as const;
 
+export const MIN_QUIZ_QUESTIONS = 10;
+export const MAX_QUIZ_QUESTIONS = 200;
+
 type QuestionType = (typeof QUESTION_TYPES)[number];
 
 export interface QuizQuestionInput {
@@ -367,7 +370,7 @@ export function validateQuizWritePayload(
   if (mode === "create" || hasOwn(rawValue, "retryLimit")) {
     const retryLimit = integerInRange(
       rawValue.retryLimit === undefined && mode === "create"
-        ? 0
+        ? 3
         : rawValue.retryLimit,
       "Attempt limit",
       0,
@@ -392,10 +395,13 @@ export function validateQuizWritePayload(
     if (!Array.isArray(rawValue.questions)) {
       return { ok: false, error: "Quiz questions must be an array" };
     }
-    if (rawValue.questions.length === 0 || rawValue.questions.length > 200) {
+    if (
+      rawValue.questions.length < MIN_QUIZ_QUESTIONS ||
+      rawValue.questions.length > MAX_QUIZ_QUESTIONS
+    ) {
       return {
         ok: false,
-        error: "A quiz must have between 1 and 200 questions",
+        error: `A quiz must have between ${MIN_QUIZ_QUESTIONS} and ${MAX_QUIZ_QUESTIONS} questions`,
       };
     }
 

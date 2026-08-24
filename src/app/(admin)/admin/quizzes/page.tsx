@@ -10,9 +10,22 @@ import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
-  AlertCircle, Plus, Edit2, Trash2, ClipboardCheck, ChevronDown,
-  ChevronUp, X,
+  MAX_QUIZ_QUESTIONS,
+  MIN_QUIZ_QUESTIONS,
+} from "@/lib/quiz-integrity";
+import {
+  AlertCircle,
+  Archive,
+  ChevronDown,
+  ChevronUp,
+  ClipboardCheck,
+  Edit2,
+  Plus,
+  X,
 } from "lucide-react";
+
+type QuizType = "MODULE" | "SECTION" | "POSITION_FINAL" | "STANDALONE";
+type QuizScope = "STANDALONE" | "MODULE" | "SECTION";
 
 interface Question {
   id?: string;
@@ -28,35 +41,65 @@ interface Quiz {
   title: string;
   description: string;
   moduleId: string | null;
-  moduleName?: string;
+  sectionId: string | null;
+  quizType: QuizType;
+  position: string | null;
+  assessmentVersion: number;
+  isActive: boolean;
+  isSystemManaged: boolean;
+  passingScore: number;
+  retryLimit: number;
+  isRequired: boolean;
+  questions: Question[];
+  module?: { id: string; title: string } | null;
+  section?: { id: string; title: string } | null;
+}
+
+interface Module {
+  id: string;
+  title: string;
+  sectionId: string;
+  section?: { id: string; title: string } | null;
+}
+
+interface QuizForm {
+  title: string;
+  description: string;
+  scope: QuizScope;
+  moduleId: string;
+  sectionId: string;
   passingScore: number;
   retryLimit: number;
   isRequired: boolean;
   questions: Question[];
 }
 
-interface Module {
-  id: string;
-  title: string;
+function createEmptyQuestion(): Question {
+  return {
+    questionText: "",
+    questionType: "MULTIPLE_CHOICE",
+    options: ["", "", "", ""],
+    correctAnswer: "",
+    explanation: "",
+  };
 }
 
-const emptyQuestion: Question = {
-  questionText: "",
-  questionType: "MULTIPLE_CHOICE",
-  options: ["", "", "", ""],
-  correctAnswer: "",
-  explanation: "",
-};
-
-const emptyForm = {
-  title: "",
-  description: "",
-  moduleId: "",
-  passingScore: 70,
-  retryLimit: 3,
-  isRequired: false,
-  questions: [{ ...emptyQuestion }] as Question[],
-};
+function createEmptyForm(): QuizForm {
+  return {
+    title: "",
+    description: "",
+    scope: "STANDALONE",
+    moduleId: "",
+    sectionId: "",
+    passingScore: 70,
+    retryLimit: 3,
+    isRequired: false,
+    questions: Array.from(
+      { length: MIN_QUIZ_QUESTIONS },
+      createEmptyQuestion,
+    ),
+  };
+}
 
 async function readApiError(response: Response, fallback: string) {
   try {
@@ -114,8 +157,9 @@ export default function QuizzesPage() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Quiz | null>(null);
-  const [form, setForm] = useState({ ...emptyForm });
+  const [form, setForm] = useState<QuizForm>(createEmptyForm);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -159,26 +203,34 @@ export default function QuizzesPage() {
 
   const openNew = () => {
     setEditing(null);
-    setForm({ ...emptyForm, questions: [{ ...emptyQuestion }] });
+    setForm(createEmptyForm());
     setError(null);
     setShowModal(true);
   };
 
   const openEdit = (quiz: Quiz) => {
+    if (quiz.isSystemManaged || !quiz.isActive) return;
+
+    const questions = quiz.questions.map((question) => ({
+      ...question,
+      explanation: question.explanation || "",
+      options: Array.isArray(question.options) ? [...question.options] : [],
+    }));
+    while (questions.length < MIN_QUIZ_QUESTIONS) {
+      questions.push(createEmptyQuestion());
+    }
+
     setEditing(quiz);
     setForm({
       title: quiz.title,
-      description: quiz.description,
+      description: quiz.description || "",
+      scope: quiz.moduleId ? "MODULE" : quiz.sectionId ? "SECTION" : "STANDALONE",
       moduleId: quiz.moduleId || "",
+      sectionId: quiz.sectionId || "",
       passingScore: quiz.passingScore,
       retryLimit: quiz.retryLimit,
       isRequired: quiz.isRequired,
-      questions: quiz.questions.length > 0
-        ? quiz.questions.map((q) => ({
-            ...q,
-            options: Array.isArray(q.options) ? [...q.options] : [],
-          }))
-        : [{ ...emptyQuestion }],
+      questions,
     });
     setError(null);
     setShowModal(true);
@@ -192,10 +244,20 @@ export default function QuizzesPage() {
     setSaving(true);
     setError(null);
     try {
+      const payload = {
+        title: form.title,
+        description: form.description,
+        moduleId: form.scope === "MODULE" ? form.moduleId : null,
+        sectionId: form.scope === "SECTION" ? form.sectionId : null,
+        passingScore: form.passingScore,
+        retryLimit: form.retryLimit,
+        isRequired: form.isRequired,
+        questions: form.questions,
+      };
       const response = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
       if (!response.ok) {
         setError(
@@ -209,7 +271,7 @@ export default function QuizzesPage() {
 
       setShowModal(false);
       setEditing(null);
-      setForm({ ...emptyForm });
+      setForm(createEmptyForm());
       await fetchData();
     } catch {
       setError("Unable to reach the training server. Your quiz was not saved.");
@@ -219,7 +281,13 @@ export default function QuizzesPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this quiz? This cannot be undone.")) return;
+    if (
+      !confirm(
+        "Archive this quiz? Employees will no longer see it, but attempts and questions will be retained.",
+      )
+    ) {
+      return;
+    }
     setDeletingId(id);
     setError(null);
     try {
@@ -227,12 +295,12 @@ export default function QuizzesPage() {
         method: "DELETE",
       });
       if (!response.ok) {
-        setError(await readApiError(response, "Unable to delete quiz"));
+        setError(await readApiError(response, "Unable to archive quiz"));
         return;
       }
       await fetchData();
     } catch {
-      setError("Unable to reach the training server. The quiz was not deleted.");
+      setError("Unable to reach the training server. The quiz was not archived.");
     } finally {
       setDeletingId(null);
     }
@@ -245,12 +313,14 @@ export default function QuizzesPage() {
   };
 
   const addQuestion = () => {
-    setForm({ ...form, questions: [...form.questions, { ...emptyQuestion }] });
+    if (form.questions.length >= MAX_QUIZ_QUESTIONS) return;
+    setForm({ ...form, questions: [...form.questions, createEmptyQuestion()] });
   };
 
   const removeQuestion = (index: number) => {
+    if (form.questions.length <= MIN_QUIZ_QUESTIONS) return;
     const questions = form.questions.filter((_, i) => i !== index);
-    setForm({ ...form, questions: questions.length > 0 ? questions : [{ ...emptyQuestion }] });
+    setForm({ ...form, questions });
   };
 
   const updateOption = (qIndex: number, oIndex: number, value: string) => {
@@ -280,10 +350,44 @@ export default function QuizzesPage() {
     return mod ? mod.title : "Unknown";
   };
 
+  const sections = Array.from(
+    new Map(
+      modules.flatMap((module) =>
+        module.section
+          ? [[module.section.id, module.section] as const]
+          : [],
+      ),
+    ).values(),
+  ).sort((left, right) => left.title.localeCompare(right.title));
+
+  const getAssessmentLabel = (quiz: Quiz) => {
+    if (quiz.quizType === "POSITION_FINAL") {
+      return quiz.position ? `${quiz.position} final` : "Position final";
+    }
+    if (quiz.quizType === "SECTION") {
+      return quiz.section?.title || "Section checkpoint";
+    }
+    if (quiz.quizType === "MODULE") {
+      return quiz.module?.title || getModuleName(quiz.moduleId);
+    }
+    return "Standalone";
+  };
+
   const moduleOptions = [
-    { value: "", label: "-- No Module --" },
+    { value: "", label: "-- Select Module --" },
     ...modules.map((m) => ({ value: m.id, label: m.title })),
   ];
+  const sectionOptions = [
+    { value: "", label: "-- Select Section --" },
+    ...sections.map((section) => ({
+      value: section.id,
+      label: section.title,
+    })),
+  ];
+  const visibleQuizzes = showArchived
+    ? quizzes
+    : quizzes.filter((quiz) => quiz.isActive);
+  const archivedCount = quizzes.filter((quiz) => !quiz.isActive).length;
 
   if (loading) {
     return (
@@ -301,9 +405,22 @@ export default function QuizzesPage() {
           <h1 className="page-title">Knowledge checks</h1>
           <p className="page-subtitle">Build focused checks that prove the team can recall what matters.</p>
         </div>
-        <Button onClick={openNew} className="flex items-center gap-2">
-          <Plus className="w-4 h-4" /> Create Quiz
-        </Button>
+        <div className="flex flex-wrap items-center gap-3">
+          {archivedCount > 0 && (
+            <label className="flex min-h-10 items-center gap-2 rounded-xl border border-ditch-navy/10 bg-white px-3 text-xs font-bold text-ditch-navy/70">
+              <input
+                type="checkbox"
+                checked={showArchived}
+                onChange={(event) => setShowArchived(event.target.checked)}
+                className="rounded border-gray-300 text-ditch-orange focus:ring-ditch-orange"
+              />
+              Show archived ({archivedCount})
+            </label>
+          )}
+          <Button onClick={openNew} className="flex items-center gap-2">
+            <Plus className="w-4 h-4" /> Create Quiz
+          </Button>
+        </div>
       </div>
 
       {error && !showModal && (
@@ -327,10 +444,16 @@ export default function QuizzesPage() {
             </Button>
           }
         />
+      ) : visibleQuizzes.length === 0 ? (
+        <EmptyState
+          icon={Archive}
+          title="No Active Quizzes"
+          description="Archived quizzes are retained for assessment history. Turn on Show archived to review them."
+        />
       ) : (
         <div className="space-y-4">
-          {quizzes.map((quiz) => (
-            <Card key={quiz.id}>
+          {visibleQuizzes.map((quiz) => (
+            <Card key={quiz.id} className={!quiz.isActive ? "opacity-75" : undefined}>
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-ditch-orange/10 rounded-lg">
@@ -340,13 +463,18 @@ export default function QuizzesPage() {
                     <div className="flex items-center gap-2">
                       <h3 className="font-semibold text-gray-900">{quiz.title}</h3>
                       {quiz.isRequired && <Badge variant="required">Required</Badge>}
+                      {quiz.isSystemManaged && <Badge>Curriculum managed</Badge>}
+                      {!quiz.isActive && <Badge variant="optional">Archived</Badge>}
                     </div>
                     <p className="text-sm text-gray-500 mt-0.5">{quiz.description}</p>
-                    <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
-                      <span>Module: {getModuleName(quiz.moduleId)}</span>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-400">
+                      <span>{quiz.quizType.replaceAll("_", " ")}: {getAssessmentLabel(quiz)}</span>
                       <span>{quiz.questions.length} questions</span>
                       <span>Passing: {quiz.passingScore}%</span>
-                      <span>Retries: {quiz.retryLimit}</span>
+                      <span>
+                        Attempts: {quiz.retryLimit === 0 ? "Unlimited" : quiz.retryLimit}
+                      </span>
+                      <span>Version {quiz.assessmentVersion}</span>
                     </div>
                   </div>
                 </div>
@@ -363,21 +491,25 @@ export default function QuizzesPage() {
                       <ChevronDown className="w-4 h-4 text-gray-400" />
                     )}
                   </button>
-                  <button
-                    onClick={() => openEdit(quiz)}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                    aria-label={`Edit ${quiz.title}`}
-                  >
-                    <Edit2 className="w-4 h-4 text-gray-400" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(quiz.id)}
-                    className="p-2 hover:bg-red-50 rounded-lg transition-colors"
-                    aria-label={`Delete ${quiz.title}`}
-                    disabled={deletingId === quiz.id}
-                  >
-                    <Trash2 className="w-4 h-4 text-red-400" />
-                  </button>
+                  {!quiz.isSystemManaged && quiz.isActive && (
+                    <>
+                      <button
+                        onClick={() => openEdit(quiz)}
+                        className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                        aria-label={`Edit ${quiz.title}`}
+                      >
+                        <Edit2 className="w-4 h-4 text-gray-400" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(quiz.id)}
+                        className="p-2 hover:bg-red-50 rounded-lg transition-colors"
+                        aria-label={`Archive ${quiz.title}`}
+                        disabled={deletingId === quiz.id}
+                      >
+                        <Archive className="w-4 h-4 text-red-400" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -451,11 +583,43 @@ export default function QuizzesPage() {
             placeholder="What does this quiz cover?"
           />
           <Select
-            label="Linked Module"
-            value={form.moduleId}
-            onChange={(e) => setForm({ ...form, moduleId: e.target.value })}
-            options={moduleOptions}
+            label="Assessment Scope"
+            value={form.scope}
+            onChange={(event) => {
+              const scope = event.target.value as QuizScope;
+              setForm({
+                ...form,
+                scope,
+                moduleId: scope === "MODULE" ? form.moduleId : "",
+                sectionId: scope === "SECTION" ? form.sectionId : "",
+              });
+            }}
+            options={[
+              { value: "STANDALONE", label: "Standalone quiz" },
+              { value: "MODULE", label: "Module knowledge check" },
+              { value: "SECTION", label: "Section checkpoint" },
+            ]}
           />
+          {form.scope === "MODULE" && (
+            <Select
+              label="Linked Module"
+              value={form.moduleId}
+              onChange={(event) =>
+                setForm({ ...form, moduleId: event.target.value })
+              }
+              options={moduleOptions}
+            />
+          )}
+          {form.scope === "SECTION" && (
+            <Select
+              label="Linked Section"
+              value={form.sectionId}
+              onChange={(event) =>
+                setForm({ ...form, sectionId: event.target.value })
+              }
+              options={sectionOptions}
+            />
+          )}
           <div className="grid grid-cols-2 gap-4">
             <Input
               label="Passing Score (%)"
@@ -483,11 +647,19 @@ export default function QuizzesPage() {
           {/* Questions Section */}
           <div className="border-t border-gray-100 pt-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-gray-900">Questions</h3>
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">
+                  Questions ({form.questions.length})
+                </h3>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Every assessment requires at least {MIN_QUIZ_QUESTIONS} valid questions.
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={addQuestion}
-                className="text-sm text-ditch-orange hover:underline flex items-center gap-1"
+                disabled={form.questions.length >= MAX_QUIZ_QUESTIONS}
+                className="flex items-center gap-1 text-sm text-ditch-orange hover:underline disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Plus className="w-3 h-3" /> Add Question
               </button>
@@ -500,7 +672,8 @@ export default function QuizzesPage() {
                     <button
                       type="button"
                       onClick={() => removeQuestion(qIdx)}
-                      className="p-1 hover:bg-red-50 rounded transition-colors"
+                      disabled={form.questions.length <= MIN_QUIZ_QUESTIONS}
+                      className="p-1 hover:bg-red-50 rounded transition-colors disabled:cursor-not-allowed disabled:opacity-30"
                       aria-label={`Remove question ${qIdx + 1}`}
                     >
                       <X className="w-4 h-4 text-red-400" />
@@ -609,7 +782,15 @@ export default function QuizzesPage() {
             >
               Cancel
             </Button>
-            <Button onClick={handleSave} disabled={saving}>
+            <Button
+              onClick={handleSave}
+              disabled={
+                saving ||
+                form.questions.length < MIN_QUIZ_QUESTIONS ||
+                (form.scope === "MODULE" && !form.moduleId) ||
+                (form.scope === "SECTION" && !form.sectionId)
+              }
+            >
               {saving ? "Saving..." : editing ? "Update" : "Create"}
             </Button>
           </div>

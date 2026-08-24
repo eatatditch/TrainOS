@@ -6,7 +6,7 @@ import Image from "next/image";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { formatDuration, formatDate } from "@/lib/utils";
-import { ArrowLeft, ArrowRight, Award, Clock, FileText, Download, Video, Image as ImageIcon, CheckCircle2, Printer } from "lucide-react";
+import { ArrowLeft, ArrowRight, Award, Clock, FileText, Download, Video, Image as ImageIcon, CheckCircle2, ClipboardCheck, Lock, Printer } from "lucide-react";
 import { MarkCompleteButton } from "@/components/training/mark-complete-button";
 import { ModuleContent } from "@/components/training/module-content";
 import {
@@ -77,17 +77,42 @@ export default async function ModuleDetailPage({
     : null;
   const isLastModule = currentIndex === sortedModules.length - 1;
 
-  // Enforce sequential module order — check if previous module is completed
+  // Enforce sequential module order — a lesson review alone is not mastery.
+  // The current-version module check must also be passed.
   if (!canManageTraining(user) && currentIndex > 0) {
     const prevModule = sortedModules[currentIndex - 1];
-    const { data: prevCompletion } = await db
-      .from("ModuleCompletion")
-      .select("id")
-      .eq("userId", userId)
-      .eq("moduleId", prevModule.id)
-      .limit(1);
+    const [{ data: prevCompletion }, { data: prevQuiz }] = await Promise.all([
+      db
+        .from("ModuleCompletion")
+        .select("id")
+        .eq("userId", userId)
+        .eq("moduleId", prevModule.id)
+        .limit(1),
+      db
+        .from("Quiz")
+        .select("id, assessmentVersion")
+        .eq("moduleId", prevModule.id)
+        .eq("quizType", "MODULE")
+        .eq("isActive", true)
+        .maybeSingle(),
+    ]);
+    const { data: previousPass } = prevQuiz
+      ? await db
+          .from("QuizAttempt")
+          .select("id")
+          .eq("userId", userId)
+          .eq("quizId", prevQuiz.id)
+          .eq("assessmentVersion", prevQuiz.assessmentVersion)
+          .eq("passed", true)
+          .limit(1)
+      : { data: [] };
 
-    if (!prevCompletion || prevCompletion.length === 0) {
+    if (
+      !prevCompletion ||
+      prevCompletion.length === 0 ||
+      !previousPass ||
+      previousPass.length === 0
+    ) {
       redirect(`/training/${sectionSlug}`);
     }
   }
@@ -102,6 +127,29 @@ export default async function ModuleDetailPage({
       .limit(1);
     isCompleted = (completionData || []).length > 0;
   }
+
+  const { data: moduleQuiz, error: moduleQuizError } = await db
+    .from("Quiz")
+    .select("id, title, description, passingScore, retryLimit, assessmentVersion, questions:QuizQuestion(id)")
+    .eq("moduleId", trainingModule.id)
+    .eq("quizType", "MODULE")
+    .eq("isActive", true)
+    .maybeSingle();
+  if (moduleQuizError) throw new Error("Unable to load the module check");
+
+  const { data: moduleQuizAttempts, error: moduleQuizAttemptsError } = moduleQuiz
+    ? await db
+        .from("QuizAttempt")
+        .select("id, score, passed, completedAt")
+        .eq("userId", userId)
+        .eq("quizId", moduleQuiz.id)
+        .eq("assessmentVersion", moduleQuiz.assessmentVersion)
+        .order("completedAt", { ascending: false })
+    : { data: [], error: null };
+  if (moduleQuizAttemptsError) throw new Error("Unable to load module check attempts");
+  const moduleCheckAttempts = moduleQuizAttempts || [];
+  const hasPassedModuleQuiz = moduleCheckAttempts.some((attempt) => attempt.passed);
+  const moduleMastered = isCompleted && hasPassedModuleQuiz;
 
   const requiresPractical = (trainingModule.tags || []).includes("practical-required");
   const { data: practicalSignoff } = requiresPractical
@@ -306,6 +354,49 @@ export default async function ModuleDetailPage({
         </div>
       )}
 
+      {moduleQuiz ? (
+        <Card className={`border-l-4 ${
+          hasPassedModuleQuiz
+            ? "border-l-ditch-green bg-ditch-seafoam/15"
+            : isCompleted
+              ? "border-l-ditch-orange"
+              : "border-l-ditch-navy/20 bg-ditch-navy/[0.03]"
+        }`}>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              {isCompleted ? (
+                <ClipboardCheck className={`mt-0.5 size-5 shrink-0 ${hasPassedModuleQuiz ? "text-ditch-green" : "text-ditch-orange"}`} />
+              ) : (
+                <Lock className="mt-0.5 size-5 shrink-0 text-ditch-navy/35" />
+              )}
+              <div>
+                <p className="page-kicker">Module mastery</p>
+                <h2 className="font-extrabold text-ditch-ink">{moduleQuiz.title}</h2>
+                <p className="mt-1 text-sm leading-6 text-ditch-navy/60">
+                  {hasPassedModuleQuiz
+                    ? "Knowledge check passed. This module is mastered."
+                    : isCompleted
+                      ? `Complete all ${(moduleQuiz.questions || []).length} questions and score ${moduleQuiz.passingScore}% or higher to unlock the next module.`
+                      : "Finish the lesson review to unlock this ten-question knowledge check."}
+                </p>
+                {moduleCheckAttempts.length > 0 ? (
+                  <p className="mt-2 text-xs font-bold text-ditch-navy/45">
+                    Best score: {Math.max(...moduleCheckAttempts.map((attempt) => attempt.score))}% · {moduleCheckAttempts.length}/{moduleQuiz.retryLimit || "∞"} attempts
+                  </p>
+                ) : null}
+              </div>
+            </div>
+            {isCompleted && !hasPassedModuleQuiz ? (
+              <Link href={`/quizzes/${moduleQuiz.id}`} className="btn-primary shrink-0">
+                {moduleCheckAttempts.length > 0 ? "Retry Check" : "Start Check"}
+              </Link>
+            ) : hasPassedModuleQuiz ? (
+              <Badge variant="completed" className="shrink-0">Mastered</Badge>
+            ) : null}
+          </div>
+        </Card>
+      ) : null}
+
       {/* Printable section */}
       {printables.length > 0 && (
         <Card>
@@ -333,19 +424,23 @@ export default async function ModuleDetailPage({
 
       {/* Next Module / Back to Section Navigation */}
       <div className="flex justify-end pt-2">
-        {nextModule ? (
+        {nextModule && (moduleMastered || canManageTraining(user)) ? (
           <Link
             href={`/training/${sectionSlug}/${nextModule.slug}`}
             className="btn-secondary"
           >
             Next Module <ArrowRight className="w-4 h-4" />
           </Link>
-        ) : isLastModule ? (
+        ) : isLastModule && (moduleMastered || canManageTraining(user)) ? (
           <Link
             href={`/training/${sectionSlug}`}
             className="btn-secondary"
           >
             Back to Section <ArrowRight className="w-4 h-4" />
+          </Link>
+        ) : moduleQuiz && isCompleted && !hasPassedModuleQuiz ? (
+          <Link href={`/quizzes/${moduleQuiz.id}`} className="btn-secondary">
+            Pass Module Check <ArrowRight className="w-4 h-4" />
           </Link>
         ) : null}
       </div>

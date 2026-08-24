@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import type { Position } from "@/lib/positions";
 
 export type AssignPathsResult = {
   pathsAdded: number;
@@ -7,6 +8,11 @@ export type AssignPathsResult = {
 
 export type AssignTrainingPathResult = AssignPathsResult & {
   alreadyAssigned: boolean;
+};
+
+export type SetUserPositionsResult = AssignPathsResult & {
+  positions: Position[];
+  primaryPosition: Position | null;
 };
 
 function timestamp(value: Date | string | null | undefined) {
@@ -72,7 +78,7 @@ export async function reconcileTrainingPathAssignments(
 }
 
 /** Assign all all-team and position-matched paths atomically. The database reads
- * the employee's current position/hire date while holding the employee lock. */
+ * every active employee position and hire date while holding the employee lock. */
 export async function assignPathsForPosition(
   userId: string,
   _position: string | null | undefined,
@@ -88,5 +94,37 @@ export async function assignPathsForPosition(
   return {
     pathsAdded: asCount(result.pathsAdded),
     modulesAdded: asCount(result.modulesAdded),
+  };
+}
+
+/** Replace an employee's active job set, mirror the primary position on User,
+ * and reconcile all automatic paths in one database transaction. */
+export async function setUserPositions(
+  userId: string,
+  positions: readonly Position[],
+  assignedById: string | null,
+): Promise<SetUserPositionsResult> {
+  const { data, error } = await db.rpc("set_user_positions_atomic", {
+    p_user_id: userId,
+    p_positions: positions,
+    p_assigned_by_id: assignedById,
+  });
+  if (error) throw new Error(error.message);
+
+  const result = (data || {}) as Record<string, unknown>;
+  const assignment =
+    typeof result.assignment === "object" && result.assignment !== null
+      ? (result.assignment as Record<string, unknown>)
+      : {};
+  return {
+    positions: Array.isArray(result.positions)
+      ? (result.positions as Position[])
+      : [...positions],
+    primaryPosition:
+      typeof result.primaryPosition === "string"
+        ? (result.primaryPosition as Position)
+        : null,
+    pathsAdded: asCount(assignment.pathsAdded),
+    modulesAdded: asCount(assignment.modulesAdded),
   };
 }

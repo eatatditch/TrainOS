@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
@@ -9,6 +9,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
 const buildDir = mkdtempSync(join(tmpdir(), "trainos-curriculum-"));
 const outputPath = join(scriptDir, "seed-authoritative-curriculum.sql");
+const checkMode = process.argv.includes("--check");
 
 const sqlString = (value) => `'${String(value).replaceAll("'", "''")}'`;
 const sqlArray = (values) =>
@@ -143,15 +144,59 @@ try {
     CURRENT_MENU_INFO,
     CURRICULUM_MODULES,
     CURRICULUM_PROGRAMS,
+    FINAL_QUESTIONS_PER_MODULE,
     FOOD_MENU_ITEMS,
     FOOD_MENU_OFFERS,
+    MODULE_ASSESSMENT_BANKS,
+    MODULE_QUESTION_COUNT,
+    POSITION_FINAL_ASSESSMENT_BANKS,
     renderCurriculumModuleHtml,
+    SECTION_ASSESSMENT_BANKS,
+    SECTION_QUESTION_COUNT,
     validateCurriculum,
   } = curriculum;
 
   const validationIssues = validateCurriculum();
   if (validationIssues.length > 0) {
     throw new Error(`Curriculum validation failed:\n${validationIssues.map((issue) => `- ${issue.code}: ${issue.message}`).join("\n")}`);
+  }
+
+  const assessmentBanks = [
+    ...MODULE_ASSESSMENT_BANKS,
+    ...SECTION_ASSESSMENT_BANKS,
+    ...POSITION_FINAL_ASSESSMENT_BANKS,
+  ];
+  const assessmentQuestionCount = assessmentBanks.reduce(
+    (total, bank) => total + bank.questions.length,
+    0,
+  );
+  const moduleAssessmentQuestionCount = MODULE_ASSESSMENT_BANKS.reduce(
+    (total, bank) => total + bank.questions.length,
+    0,
+  );
+  const sectionAssessmentQuestionCount = SECTION_ASSESSMENT_BANKS.reduce(
+    (total, bank) => total + bank.questions.length,
+    0,
+  );
+  const finalAssessmentQuestionCount = POSITION_FINAL_ASSESSMENT_BANKS.reduce(
+    (total, bank) => total + bank.questions.length,
+    0,
+  );
+  if (
+    MODULE_ASSESSMENT_BANKS.length !== 54 ||
+    SECTION_ASSESSMENT_BANKS.length !== 7 ||
+    POSITION_FINAL_ASSESSMENT_BANKS.length !== 14 ||
+    assessmentBanks.length !== 75 ||
+    assessmentQuestionCount !== 1_082 ||
+    moduleAssessmentQuestionCount !== 540 ||
+    sectionAssessmentQuestionCount !== 70 ||
+    finalAssessmentQuestionCount !== 472 ||
+    MODULE_ASSESSMENT_BANKS.some((bank) => bank.questions.length !== MODULE_QUESTION_COUNT) ||
+    SECTION_ASSESSMENT_BANKS.some((bank) => bank.questions.length !== SECTION_QUESTION_COUNT)
+  ) {
+    throw new Error(
+      `Assessment count assertion failed: modules=${MODULE_ASSESSMENT_BANKS.length}, sections=${SECTION_ASSESSMENT_BANKS.length}, finals=${POSITION_FINAL_ASSESSMENT_BANKS.length}, quizzes=${assessmentBanks.length}, questions=${assessmentQuestionCount}.`,
+    );
   }
 
   const sections = CURRICULUM_PROGRAMS.map((program, index) => ({
@@ -269,7 +314,22 @@ WHERE utp."isActive" = true
   FROM "User" u
   JOIN "TrainingPath" p
     ON p.id = 'path-hospitality-reset'
-    OR u.position = ANY (p."targetPositions")
+    OR EXISTS (
+      SELECT 1
+      FROM "UserPosition" up
+      WHERE up."userId" = u.id
+        AND up."isActive" = true
+        AND up.position = ANY (p."targetPositions")
+    )
+    OR (
+      NOT EXISTS (
+        SELECT 1
+        FROM "UserPosition" up
+        WHERE up."userId" = u.id
+          AND up."isActive" = true
+      )
+      AND u.position = ANY (p."targetPositions")
+    )
   LEFT JOIN "TrainingPathModule" tpm ON tpm."trainingPathId" = p.id
   LEFT JOIN "Module" m ON m.id = tpm."moduleId" AND m."isActive" = true
   LEFT JOIN "Section" s ON s.id = m."sectionId" AND s."isActive" = true
@@ -312,7 +372,22 @@ ON CONFLICT ("userId", "trainingPathId") DO UPDATE SET
   FROM "User" u
   JOIN "TrainingPath" p
     ON p.id = 'path-hospitality-reset'
-    OR u.position = ANY (p."targetPositions")
+    OR EXISTS (
+      SELECT 1
+      FROM "UserPosition" up
+      WHERE up."userId" = u.id
+        AND up."isActive" = true
+        AND up.position = ANY (p."targetPositions")
+    )
+    OR (
+      NOT EXISTS (
+        SELECT 1
+        FROM "UserPosition" up
+        WHERE up."userId" = u.id
+          AND up."isActive" = true
+      )
+      AND u.position = ANY (p."targetPositions")
+    )
   JOIN "TrainingPathModule" tpm ON tpm."trainingPathId" = p.id
   JOIN "Module" m ON m.id = tpm."moduleId" AND m."isActive" = true
   JOIN "Section" s ON s.id = m."sectionId" AND s."isActive" = true
@@ -352,60 +427,73 @@ ON CONFLICT ("userId", "moduleId") DO UPDATE SET
     ""
   );
 
-  const quizRows = [];
-  const questionRows = [];
-  const quizIds = [];
-  for (const curriculumModule of CURRICULUM_MODULES) {
-    const gradable = curriculumModule.assessment.questions.filter((question) => {
-      if (question.type === "multiple-choice") return typeof question.correctAnswer === "string";
-      if (question.type === "true-false") return typeof question.correctAnswer === "boolean";
-      if (question.type === "short-answer") return typeof question.correctAnswer === "string";
-      return false;
+  const assessmentQuizIds = assessmentBanks.map((bank) => bank.quizId);
+  const sectionAssessmentQuizIds = SECTION_ASSESSMENT_BANKS.map((bank) => bank.quizId);
+  const assessmentQuestionIds = assessmentBanks.flatMap((bank) =>
+    bank.questions.map((question) => question.id),
+  );
+  const assessmentQuizRows = assessmentBanks.map((bank) => {
+    const moduleId = bank.quizType === "MODULE" ? sqlString(bank.moduleId) : "NULL";
+    const sectionId = bank.quizType === "SECTION" ? sqlString(bank.sectionId) : "NULL";
+    const position = bank.quizType === "POSITION_FINAL" ? sqlString(bank.position) : "NULL";
+    return `  (${sqlString(bank.quizId)}, ${moduleId}, ${sectionId}, ${sqlString(bank.title)}, ${sqlString(bank.description)}, ${bank.passingScore}, ${bank.retryLimit}, true, ${sqlString(bank.quizType)}, ${position}, ${bank.assessmentVersion}, true, true)`;
+  });
+  const assessmentQuestionRows = assessmentBanks.flatMap((bank) =>
+    bank.questions.map(
+      (question, index) =>
+        `  (${sqlString(question.id)}, ${sqlString(bank.quizId)}, ${sqlString(question.questionText)}, ${sqlString(question.questionType)}, ${question.options ? json(question.options) : "NULL"}, ${sqlString(question.correctAnswer)}, ${sqlString(question.explanation)}, ${index + 1}, ${sqlString(question.sourceModuleId)})`,
+    ),
+  );
+  const assessmentCoverageRows = assessmentBanks.flatMap((bank) => {
+    if (bank.quizType === "MODULE") {
+      return [
+        `  (${sqlString(bank.quizId)}, ${sqlString(bank.moduleId)}, 1, ${MODULE_QUESTION_COUNT})`,
+      ];
+    }
+    return bank.coveredModuleIds.map((moduleId, index) => {
+      const questionsRequired = bank.questions.filter(
+        (question) => question.sourceModuleId === moduleId,
+      ).length;
+      const expectedQuestions =
+        bank.quizType === "POSITION_FINAL" ? FINAL_QUESTIONS_PER_MODULE : questionsRequired;
+      if (
+        questionsRequired !== expectedQuestions ||
+        (bank.quizType === "SECTION" && questionsRequired < 1)
+      ) {
+        throw new Error(
+          `${bank.quizId} coverage mismatch for ${moduleId}: ${questionsRequired} questions.`,
+        );
+      }
+      return `  (${sqlString(bank.quizId)}, ${sqlString(moduleId)}, ${index + 1}, ${questionsRequired})`;
     });
-    if (gradable.length === 0) continue;
+  });
 
-    const quizId = `quiz-${curriculumModule.id}`;
-    quizIds.push(quizId);
-    quizRows.push(
-      `  (${sqlString(quizId)}, ${sqlString(curriculumModule.id)}, NULL, ${sqlString(`${curriculumModule.title} Knowledge Check`)}, ${sqlString(`Knowledge proof for ${curriculumModule.title}. Practical proof remains in the module.`)}, ${curriculumModule.assessment.passingScore}, ${curriculumModule.assessment.retryLimit}, true)`
-    );
-    gradable.forEach((question, index) => {
-      const questionType =
-        question.type === "multiple-choice"
-          ? "MULTIPLE_CHOICE"
-          : question.type === "true-false"
-            ? "TRUE_FALSE"
-            : "SHORT_ANSWER";
-      const options =
-        question.type === "multiple-choice"
-          ? question.options ?? []
-          : question.type === "true-false"
-            ? ["True", "False"]
-            : null;
-      const answer =
-        typeof question.correctAnswer === "boolean"
-          ? question.correctAnswer
-            ? "True"
-            : "False"
-          : question.correctAnswer;
-      questionRows.push(
-        `  (${sqlString(question.id)}, ${sqlString(quizId)}, ${sqlString(question.prompt)}, ${sqlString(questionType)}, ${options ? json(options) : "NULL"}, ${sqlString(answer)}, ${sqlString(question.explanation ?? "Review the approved curriculum source and run the practical rep.")}, ${index + 1})`
-      );
-    });
-  }
-
-  if (quizRows.length > 0) {
-    lines.push(
-      "INSERT INTO \"Quiz\" (id, \"moduleId\", \"sectionId\", title, description, \"passingScore\", \"retryLimit\", \"isRequired\") VALUES",
-      quizRows.join(",\n") +
-        "\nON CONFLICT (id) DO UPDATE SET\n  \"moduleId\" = EXCLUDED.\"moduleId\",\n  title = EXCLUDED.title,\n  description = EXCLUDED.description,\n  \"passingScore\" = EXCLUDED.\"passingScore\",\n  \"retryLimit\" = EXCLUDED.\"retryLimit\",\n  \"isRequired\" = true;",
-      "",
-      `DELETE FROM \"QuizQuestion\" WHERE \"quizId\" IN (${quizIds.map(sqlString).join(", ")});`,
-      "INSERT INTO \"QuizQuestion\" (id, \"quizId\", \"questionText\", \"questionType\", options, \"correctAnswer\", explanation, \"sortOrder\") VALUES",
-      questionRows.join(",\n") + ";",
-      ""
-    );
-  }
+  lines.push(
+    "-- Version 2 assessments are system-managed, objective, and source-auditable.",
+    "-- Old quiz rows remain for attempt history but are no longer assignable.",
+    `UPDATE "Quiz"
+SET "isActive" = false,
+    "isRequired" = false
+WHERE id LIKE 'quiz-cur-%'
+   OR ("sectionId" IS NOT NULL AND id NOT IN (${sectionAssessmentQuizIds.map(sqlString).join(", ")}))
+   OR ("isSystemManaged" = true AND id NOT IN (${assessmentQuizIds.map(sqlString).join(", ")}));`,
+    "",
+    "INSERT INTO \"Quiz\" (id, \"moduleId\", \"sectionId\", title, description, \"passingScore\", \"retryLimit\", \"isRequired\", \"quizType\", position, \"assessmentVersion\", \"isActive\", \"isSystemManaged\") VALUES",
+    assessmentQuizRows.join(",\n") +
+      "\nON CONFLICT (id) DO UPDATE SET\n  \"moduleId\" = EXCLUDED.\"moduleId\",\n  \"sectionId\" = EXCLUDED.\"sectionId\",\n  title = EXCLUDED.title,\n  description = EXCLUDED.description,\n  \"passingScore\" = EXCLUDED.\"passingScore\",\n  \"retryLimit\" = EXCLUDED.\"retryLimit\",\n  \"isRequired\" = true,\n  \"quizType\" = EXCLUDED.\"quizType\",\n  position = EXCLUDED.position,\n  \"assessmentVersion\" = EXCLUDED.\"assessmentVersion\",\n  \"isActive\" = true,\n  \"isSystemManaged\" = true;",
+    "",
+    "INSERT INTO \"QuizQuestion\" (id, \"quizId\", \"questionText\", \"questionType\", options, \"correctAnswer\", explanation, \"sortOrder\", \"sourceModuleId\") VALUES",
+    assessmentQuestionRows.join(",\n") +
+      "\nON CONFLICT (id) DO UPDATE SET\n  \"quizId\" = EXCLUDED.\"quizId\",\n  \"questionText\" = EXCLUDED.\"questionText\",\n  \"questionType\" = EXCLUDED.\"questionType\",\n  options = EXCLUDED.options,\n  \"correctAnswer\" = EXCLUDED.\"correctAnswer\",\n  explanation = EXCLUDED.explanation,\n  \"sortOrder\" = EXCLUDED.\"sortOrder\",\n  \"sourceModuleId\" = EXCLUDED.\"sourceModuleId\";",
+    `DELETE FROM "QuizQuestion"
+WHERE "quizId" IN (${assessmentQuizIds.map(sqlString).join(", ")})
+  AND id NOT IN (${assessmentQuestionIds.map(sqlString).join(", ")});`,
+    "",
+    `DELETE FROM "QuizModuleCoverage" WHERE "quizId" IN (${assessmentQuizIds.map(sqlString).join(", ")});`,
+    "INSERT INTO \"QuizModuleCoverage\" (\"quizId\", \"moduleId\", \"sortOrder\", \"questionsRequired\") VALUES",
+    assessmentCoverageRows.join(",\n") + ";",
+    "",
+  );
 
   const moduleSearchRows = CURRICULUM_MODULES.map((curriculumModule) => {
     const content = [
@@ -455,8 +543,23 @@ WHERE "foodItemId" IN (SELECT id FROM "SearchIndex" WHERE "contentType" = 'food'
     ""
   );
 
-  writeFileSync(outputPath, lines.join("\n"), "utf8");
-  process.stdout.write(`Generated ${outputPath}\n`);
+  const generatedSql = lines.join("\n");
+  if (checkMode) {
+    const committedSql = readFileSync(outputPath, "utf8");
+    if (committedSql !== generatedSql) {
+      throw new Error(
+        "Authoritative curriculum seed is stale. Run `npm run curriculum:generate` and commit the result.",
+      );
+    }
+    process.stdout.write(
+      `Curriculum and assessment seed verified: 75 active quizzes, ${assessmentQuestionCount} objective questions (540 module, 70 section, 472 final).\n`,
+    );
+  } else {
+    writeFileSync(outputPath, generatedSql, "utf8");
+    process.stdout.write(
+      `Generated ${outputPath}: 75 active quizzes, ${assessmentQuestionCount} objective questions (540 module, 70 section, 472 final).\n`,
+    );
+  }
 } finally {
   rmSync(buildDir, { recursive: true, force: true });
 }

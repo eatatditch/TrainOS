@@ -18,7 +18,7 @@ export async function GET() {
     db.from("Module").select("id").eq("isActive", true),
     db.from("ModuleAssignment").select("userId, moduleId").eq("isActive", true),
     db.from("ModuleCompletion").select("userId, moduleId"),
-    db.from("QuizAttempt").select("userId, score, quiz:Quiz(moduleId)"),
+    db.from("QuizAttempt").select("userId, score, assessmentVersion, quiz:Quiz(moduleId, quizType, isActive, assessmentVersion)"),
   ]);
   const error = usersResult.error || modulesResult.error || assignmentsResult.error || completionsResult.error || attemptsResult.error;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -36,12 +36,17 @@ export async function GET() {
   const rows = users.map((user: any) => {
     const userAssignmentKeys = Array.from(assignmentKeys).filter((key) => key.startsWith(`${user.id}:`));
     const completed = userAssignmentKeys.filter((key) => completionKeys.has(key)).length;
-    const attempts = (attemptsResult.data || []).filter((attempt: any) => attempt.userId === user.id && attempt.quiz?.moduleId && activeModuleIds.has(attempt.quiz.moduleId));
+    const attempts = (attemptsResult.data || []).filter((attempt: any) =>
+      attempt.userId === user.id &&
+      attempt.quiz?.isActive &&
+      attempt.assessmentVersion === attempt.quiz.assessmentVersion &&
+      (attempt.quiz.quizType !== "MODULE" || activeModuleIds.has(attempt.quiz.moduleId)),
+    );
     const avgScore = attempts.length ? Math.round(attempts.reduce((sum: number, attempt: any) => sum + attempt.score, 0) / attempts.length) : 0;
     return [`${user.firstName} ${user.lastName}`, user.email, user.role, user.location || "", userAssignmentKeys.length, completed, userAssignmentKeys.length ? Math.round((completed / userAssignmentKeys.length) * 100) : 0, avgScore];
   });
 
-  const headers = ["Name", "Email", "Role", "Location", "Assigned", "Completed", "Completion %", "Avg Quiz Score"];
+  const headers = ["Name", "Email", "Role", "Location", "Assigned", "Completed", "Completion %", "Avg Assessment Score"];
   const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
   return new NextResponse(csv, {
     headers: {

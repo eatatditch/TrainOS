@@ -130,7 +130,8 @@ export async function GET(request: NextRequest) {
   if (type === "all" || type === "quiz") {
     const { data: quizzes } = await db
       .from("Quiz")
-      .select("*, module:Module(*, section:Section(*)), section:Section(*)")
+      .select("*, module:Module(*, section:Section(*)), section:Section(*), coverage:QuizModuleCoverage(moduleId)")
+      .eq("isActive", true)
       .or(`title.ilike.%${filterQuery}%,description.ilike.%${filterQuery}%`)
       .limit(10);
 
@@ -141,7 +142,20 @@ export async function GET(request: NextRequest) {
       const hasActiveSectionParent = Boolean(
         !quiz.moduleId && quiz.sectionId && quiz.section?.isActive,
       );
-      if (!hasActiveModuleParent && !hasActiveSectionParent) continue;
+      const hasPositionFinal = Boolean(
+        quiz.quizType === "POSITION_FINAL" &&
+        quiz.position &&
+        (canManageTraining(auth.user) || auth.user.positions.includes(quiz.position)),
+      );
+      const hasManagedStandalone = Boolean(
+        quiz.quizType === "STANDALONE" && canManageTraining(auth.user),
+      );
+      if (
+        !hasActiveModuleParent &&
+        !hasActiveSectionParent &&
+        !hasPositionFinal &&
+        !hasManagedStandalone
+      ) continue;
       if (accessibleModuleIds !== null) {
         const moduleAllowed = quiz.moduleId
           ? accessibleModuleIds.has(quiz.moduleId)
@@ -149,14 +163,20 @@ export async function GET(request: NextRequest) {
         const sectionAllowed = quiz.sectionId
           ? accessibleSectionIds.has(quiz.sectionId)
           : false;
-        if (!moduleAllowed && !sectionAllowed) continue;
+        const finalAllowed = hasPositionFinal &&
+          Array.isArray(quiz.coverage) &&
+          quiz.coverage.length > 0 &&
+          quiz.coverage.every((coverage: { moduleId?: string }) =>
+            !!coverage.moduleId && accessibleModuleIds.has(coverage.moduleId),
+          );
+        if (!moduleAllowed && !sectionAllowed && !finalAllowed) continue;
       }
       results.push({
         id: quiz.id,
         type: "quiz",
         title: quiz.title,
         description: quiz.description || "",
-        sectionTitle: quiz.module?.section?.title || "",
+        sectionTitle: quiz.module?.section?.title || quiz.section?.title || quiz.position || "",
         sectionSlug: quiz.module?.section?.slug || "",
         moduleSlug: quiz.module?.slug || "",
         tags: [],

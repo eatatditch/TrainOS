@@ -10,7 +10,7 @@ async function loadReportData() {
     db.from("Module").select("id, isActive"),
     db.from("ModuleAssignment").select("id, userId, moduleId, dueDate, user:User(firstName, lastName), module:Module(title)").eq("isActive", true),
     db.from("ModuleCompletion").select("userId, moduleId"),
-    db.from("QuizAttempt").select("userId, score, passed, quiz:Quiz(moduleId)"),
+    db.from("QuizAttempt").select("userId, score, passed, assessmentVersion, quiz:Quiz(moduleId, quizType, isActive, assessmentVersion)"),
   ]);
   const error = usersResult.error || modulesResult.error || assignmentsResult.error || completionsResult.error || quizAttemptsResult.error;
   if (error) throw new Error(error.message);
@@ -30,9 +30,16 @@ async function loadReportData() {
       .map((completion: any) => pairKey(completion.userId, completion.moduleId))
       .filter((key: string) => assignmentMap.has(key)),
   );
-  const quizAttempts = (quizAttemptsResult.data || []).filter((attempt: any) =>
-    activeUserIds.has(attempt.userId) && attempt.quiz?.moduleId && activeModuleIds.has(attempt.quiz.moduleId),
-  );
+  const quizAttempts = (quizAttemptsResult.data || []).filter((attempt: any) => {
+    if (
+      !activeUserIds.has(attempt.userId) ||
+      !attempt.quiz?.isActive ||
+      attempt.assessmentVersion !== attempt.quiz.assessmentVersion
+    ) {
+      return false;
+    }
+    return attempt.quiz.quizType !== "MODULE" || activeModuleIds.has(attempt.quiz.moduleId);
+  });
   return { users, activeUsers, activeModules, assignments: Array.from(assignmentMap.values()), completionKeys, quizAttempts };
 }
 

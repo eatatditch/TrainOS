@@ -54,3 +54,15 @@ export const POSITION_NOTES: Partial<Record<Position, string>> = {
 export function isPosition(value: unknown): value is Position {
   return typeof value === "string" && (POSITIONS as readonly string[]).includes(value);
 }
+
+/** Normalize an API payload into a distinct, ordered list of controlled jobs.
+ * The first entry is the employee's primary/display position. */
+export function normalizePositions(value: unknown): Position[] {
+  if (!Array.isArray(value)) return [];
+
+  const positions: Position[] = [];
+  for (const item of value) {
+    if (isPosition(item) && !positions.includes(item)) positions.push(item);
+  }
+  return positions;
+}

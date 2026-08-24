@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { db } from "@/lib/db";
-import { assignPathsForPosition } from "@/lib/assignPaths";
+import { assignPathsForPosition, setUserPositions } from "@/lib/assignPaths";
 import { ADMIN_ROLES, MANAGER_ROLES, authorizeApi } from "@/lib/api-auth";
 import { validatePassword } from "@/lib/password-policy";
+import { isPosition, normalizePositions, type Position } from "@/lib/positions";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await authorizeApi(MANAGER_ROLES);
@@ -25,34 +26,76 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     { data: completions },
     { data: quizAttempts },
     { data: trainingPaths },
+    { data: positionRows },
+    { data: quizCoverage },
   ] = await Promise.all([
     db.from("ModuleAssignment").select("*, module:Module(*, section:Section(*))").eq("userId", id),
     db.from("ModuleCompletion").select("*, module:Module(*)").eq("userId", id),
     db.from("QuizAttempt").select("*, quiz:Quiz(*)").eq("userId", id).order("completedAt", { ascending: false }),
     db.from("UserTrainingPath").select("*, trainingPath:TrainingPath(*)").eq("userId", id),
+    db
+      .from("UserPosition")
+      .select("position, isPrimary")
+      .eq("userId", id)
+      .eq("isActive", true)
+      .order("isPrimary", { ascending: false })
+      .order("position", { ascending: true }),
+    db.from("QuizModuleCoverage").select("quizId, moduleId"),
   ]);
 
-  const currentAssignments = (assignments || []).filter((assignment: any) =>
+  const currentAssignments = (assignments || []).filter((assignment) =>
     assignment.isActive && assignment.module?.isActive && assignment.module?.section?.isActive,
   );
   const currentAssignmentIds = new Set(
-    currentAssignments.map((assignment: any) => assignment.moduleId),
+    currentAssignments.map((assignment) => assignment.moduleId),
   );
-  const currentCompletions = (completions || []).filter((completion: any) =>
+  const currentCompletions = (completions || []).filter((completion) =>
     completion.module?.isActive && currentAssignmentIds.has(completion.moduleId),
   );
-  const currentQuizAttempts = (quizAttempts || []).filter((attempt: any) => {
+
+  const positions = normalizePositions(
+    (positionRows || []).map((row) => row.position),
+  );
+  if (positions.length === 0 && isPosition(employee.position)) {
+    positions.push(employee.position);
+  }
+  const positionSet = new Set<Position>(positions);
+  const coverageByQuiz = new Map<string, string[]>();
+  for (const row of quizCoverage || []) {
+    const moduleIds = coverageByQuiz.get(row.quizId) || [];
+    moduleIds.push(row.moduleId);
+    coverageByQuiz.set(row.quizId, moduleIds);
+  }
+  const currentQuizAttempts = (quizAttempts || []).filter((attempt) => {
     const quiz = attempt.quiz;
-    if (!quiz) return false;
-    if (quiz.moduleId) return currentAssignmentIds.has(quiz.moduleId);
-    return false;
+    if (
+      !quiz?.isActive ||
+      attempt.assessmentVersion !== quiz.assessmentVersion ||
+      !["MODULE", "SECTION", "POSITION_FINAL"].includes(quiz.quizType)
+    ) {
+      return false;
+    }
+    if (quiz.quizType === "MODULE") {
+      return !!quiz.moduleId && currentAssignmentIds.has(quiz.moduleId);
+    }
+
+    const coveredModules = coverageByQuiz.get(quiz.id) || [];
+    if (
+      coveredModules.length === 0 ||
+      !coveredModules.every((moduleId) => currentAssignmentIds.has(moduleId))
+    ) {
+      return false;
+    }
+    return quiz.quizType !== "POSITION_FINAL" || positionSet.has(quiz.position);
   });
   const currentTrainingPaths = (trainingPaths || []).filter(
-    (link: any) => link.isActive && link.trainingPath?.isActive,
+    (link) => link.isActive && link.trainingPath?.isActive,
   );
 
   return NextResponse.json({
     ...employee,
+    position: positions[0] || null,
+    positions,
     assignments: currentAssignments,
     completions: currentCompletions,
     quizAttempts: currentQuizAttempts,
@@ -74,11 +117,20 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
   const data = await request.json();
 
-  const { data: priorUser } = await db
-    .from("User")
-    .select("authId, role, position, hireDate, isActive")
-    .eq("id", id)
-    .single();
+  const [{ data: priorUser }, { data: priorPositionRows }] = await Promise.all([
+    db
+      .from("User")
+      .select("authId, role, position, hireDate, isActive")
+      .eq("id", id)
+      .single(),
+    db
+      .from("UserPosition")
+      .select("position, isPrimary")
+      .eq("userId", id)
+      .eq("isActive", true)
+      .order("isPrimary", { ascending: false })
+      .order("position", { ascending: true }),
+  ]);
 
   if (!priorUser) {
     return NextResponse.json({ error: "Employee not found" }, { status: 404 });
@@ -107,6 +159,30 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       { error: "You cannot deactivate your own account" },
       { status: 400 },
     );
+  }
+
+  const positionsWereProvided =
+    data.positions !== undefined || data.position !== undefined;
+  const rawPositions = data.positions !== undefined
+    ? data.positions
+    : data.position
+      ? [data.position]
+      : [];
+  if (
+    positionsWereProvided &&
+    (!Array.isArray(rawPositions) || rawPositions.some((value) => !isPosition(value)))
+  ) {
+    return NextResponse.json(
+      { error: "One or more positions is invalid" },
+      { status: 400 },
+    );
+  }
+  const requestedPositions = normalizePositions(rawPositions);
+  const priorPositions = normalizePositions(
+    (priorPositionRows || []).map((row) => row.position),
+  );
+  if (priorPositions.length === 0 && isPosition(priorUser.position)) {
+    priorPositions.push(priorUser.position);
   }
 
   if (data.password !== undefined) {
@@ -162,59 +238,61 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     }
   }
 
-  const updateData: any = {};
+  const updateData: Record<string, unknown> = {};
   if (data.firstName) updateData.firstName = data.firstName;
   if (data.lastName) updateData.lastName = data.lastName;
   if (data.email) updateData.email = data.email.trim().toLowerCase();
   if (data.role) updateData.role = data.role;
-  if (data.position !== undefined) updateData.position = data.position || null;
   if (data.location !== undefined) updateData.location = data.location;
   if (data.phone !== undefined) updateData.phone = data.phone;
   if (data.isActive !== undefined) updateData.isActive = data.isActive;
   if (data.skipReviewTimer !== undefined) updateData.skipReviewTimer = !!data.skipReviewTimer;
   if (data.password !== undefined) updateData.mustResetPassword = true;
 
-  const { data: updatedUser, error } = await db
-    .from("User")
-    .update(updateData)
-    .eq("id", id)
-    .select()
-    .single();
+  const updatedResult = Object.keys(updateData).length > 0
+    ? await db.from("User").update(updateData).eq("id", id).select().single()
+    : await db.from("User").select().eq("id", id).single();
+  const { data: updatedUser, error } = updatedResult;
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Synchronize controlled position paths when the employee changes jobs or
-  // returns from inactive status. The RPC removes obsolete auto-assigned paths
-  // but deliberately preserves every manual manager assignment.
-  if (
-    updatedUser.isActive &&
-    (
-      (data.position !== undefined &&
-        (updatedUser.position ?? null) !== (priorUser?.position ?? null)) ||
-      (data.isActive === true && priorUser.isActive === false)
-    )
-  ) {
-    try {
+  // Position changes, the compatibility scalar, and every affected automatic
+  // path are committed together by the database RPC. Manual manager-assigned
+  // paths remain untouched. Reactivation without a position edit still gets a
+  // fresh reconciliation in case the curriculum changed while the user was off.
+  let positions = priorPositions;
+  try {
+    if (positionsWereProvided) {
+      const result = await setUserPositions(id, requestedPositions, adminUser.id);
+      positions = result.positions;
+    } else if (updatedUser.isActive && data.isActive === true && priorUser.isActive === false) {
       await assignPathsForPosition(
         updatedUser.id,
         updatedUser.position,
         updatedUser.hireDate ?? priorUser?.hireDate ?? null,
         adminUser.id,
       );
-    } catch (assignmentError) {
-      return NextResponse.json(
-        {
-          error:
-            assignmentError instanceof Error
-              ? assignmentError.message
-              : "Employee saved, but training paths could not be synchronized",
-        },
-        { status: 500 },
-      );
     }
+  } catch (assignmentError) {
+    return NextResponse.json(
+      {
+        error:
+          assignmentError instanceof Error
+            ? assignmentError.message
+            : "Employee saved, but positions and training paths could not be synchronized",
+      },
+      { status: 500 },
+    );
   }
 
-  return NextResponse.json({ id: updatedUser.id, email: updatedUser.email, firstName: updatedUser.firstName, lastName: updatedUser.lastName });
+  return NextResponse.json({
+    id: updatedUser.id,
+    email: updatedUser.email,
+    firstName: updatedUser.firstName,
+    lastName: updatedUser.lastName,
+    position: positions[0] || null,
+    positions,
+  });
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {

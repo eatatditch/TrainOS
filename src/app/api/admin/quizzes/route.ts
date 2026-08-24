@@ -15,10 +15,22 @@ interface AdminQuizRow extends Record<string, unknown> {
   questions?: unknown;
 }
 
+type ManualQuizType = "MODULE" | "SECTION" | "STANDALONE";
+
+function deriveManualQuizType(
+  moduleId: string | null,
+  sectionId: string | null,
+): ManualQuizType {
+  if (moduleId) return "MODULE";
+  if (sectionId) return "SECTION";
+  return "STANDALONE";
+}
+
 function questionInsertRow(
   quizId: string,
   question: QuizQuestionInput,
   sortOrder: number,
+  sourceModuleId: string | null,
 ) {
   return {
     quizId,
@@ -28,6 +40,7 @@ function questionInsertRow(
     correctAnswer: question.correctAnswer,
     explanation: question.explanation,
     sortOrder,
+    sourceModuleId,
   };
 }
 
@@ -38,7 +51,7 @@ async function validateAssociation(
   if (moduleId) {
     const { data, error } = await db
       .from("Module")
-      .select("id")
+      .select("id, isActive")
       .eq("id", moduleId)
       .maybeSingle();
     if (error) {
@@ -53,12 +66,18 @@ async function validateAssociation(
         { status: 400 },
       );
     }
+    if (!data.isActive) {
+      return NextResponse.json(
+        { error: "Linked module is archived" },
+        { status: 400 },
+      );
+    }
   }
 
   if (sectionId) {
     const { data, error } = await db
       .from("Section")
-      .select("id")
+      .select("id, isActive")
       .eq("id", sectionId)
       .maybeSingle();
     if (error) {
@@ -73,6 +92,12 @@ async function validateAssociation(
         { status: 400 },
       );
     }
+    if (!data.isActive) {
+      return NextResponse.json(
+        { error: "Linked section is archived" },
+        { status: 400 },
+      );
+    }
   }
 
   return null;
@@ -84,7 +109,11 @@ export async function GET() {
 
   const { data: quizzes, error } = await db
     .from("Quiz")
-    .select("*, module:Module(*, section:Section(*)), questions:QuizQuestion(*)");
+    .select(
+      "*, module:Module(*, section:Section(*)), section:Section(*), questions:QuizQuestion(*)",
+    )
+    .order("isActive", { ascending: false })
+    .order("title", { ascending: true });
 
   if (error) {
     return NextResponse.json(
@@ -135,24 +164,39 @@ export async function POST(request: NextRequest) {
   );
   if (associationError) return associationError;
 
+  const quizType = deriveManualQuizType(
+    data.moduleId ?? null,
+    data.sectionId ?? null,
+  );
+
   const { data: quiz, error: quizError } = await db
     .from("Quiz")
     .insert({
       moduleId: data.moduleId ?? null,
       sectionId: data.sectionId ?? null,
+      quizType,
+      position: null,
+      assessmentVersion: 1,
+      isActive: true,
+      isSystemManaged: false,
       title: data.title,
       description: data.description ?? "",
       passingScore: data.passingScore ?? 70,
-      retryLimit: data.retryLimit ?? 0,
+      retryLimit: data.retryLimit ?? 3,
       isRequired: data.isRequired ?? false,
     })
     .select()
     .single();
 
   if (quizError || !quiz) {
+    const associationConflict = quizError?.code === "23505";
     return NextResponse.json(
-      { error: "Unable to create quiz" },
-      { status: 500 },
+      {
+        error: associationConflict
+          ? "That module or section already has an active assessment"
+          : "Unable to create quiz",
+      },
+      { status: associationConflict ? 409 : 500 },
     );
   }
 
@@ -160,7 +204,12 @@ export async function POST(request: NextRequest) {
     .from("QuizQuestion")
     .insert(
       questions.map((question, index) =>
-        questionInsertRow(quiz.id, question, index),
+        questionInsertRow(
+          quiz.id,
+          question,
+          index,
+          data.moduleId ?? null,
+        ),
       ),
     )
     .select();

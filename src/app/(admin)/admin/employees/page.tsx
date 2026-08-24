@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,7 @@ import { SearchInput } from "@/components/ui/search-input";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
-  Plus, Users, Eye, EyeOff, Route, X, ClipboardCheck, Briefcase,
+  Plus, Users, Route, X, Briefcase,
 } from "lucide-react";
 import { POSITIONS, POSITION_DEPARTMENTS, POSITION_NOTES, type Position } from "@/lib/positions";
 
@@ -22,6 +22,7 @@ interface Employee {
   email: string;
   role: string;
   position: Position | null;
+  positions: Position[];
   location: string;
   phone: string;
   isActive: boolean;
@@ -30,34 +31,149 @@ interface Employee {
   trainingPaths: { id: string; title: string }[];
 }
 
+interface TrainingPath {
+  id: string;
+  title: string;
+  targetRole?: string | null;
+  description?: string | null;
+}
+
+async function loadCrewData() {
+  const [employeeResponse, pathResponse] = await Promise.all([
+    fetch("/api/admin/employees"),
+    fetch("/api/admin/paths"),
+  ]);
+  const [employeeData, pathData] = await Promise.all([
+    employeeResponse.json(),
+    pathResponse.json(),
+  ]);
+
+  return {
+    employees: Array.isArray(employeeData) ? employeeData as Employee[] : [],
+    paths: Array.isArray(pathData) ? pathData as TrainingPath[] : [],
+  };
+}
+
 const emptyForm = {
   firstName: "",
   lastName: "",
   email: "",
   password: "",
   role: "EMPLOYEE",
-  position: "" as Position | "",
+  positions: [] as Position[],
   location: "",
   phone: "",
   trainingPathIds: [] as string[],
 };
-
-const POSITION_OPTIONS = [
-  { value: "", label: "— Select position —" },
-  ...POSITIONS.map((p) => ({
-    value: p,
-    label: POSITION_NOTES[p] ? `${p} (${POSITION_NOTES[p]})` : p,
-  })),
-];
 
 const POSITION_FILTER_OPTIONS = [
   { value: "", label: "All Positions" },
   ...POSITIONS.map((p) => ({ value: p, label: p })),
 ];
 
+const POSITION_GROUPS = ["FOH", "BOH", "Management"] as const;
+
+function PositionPicker({
+  positions,
+  onChange,
+  disabled = false,
+}: {
+  positions: Position[];
+  onChange: (positions: Position[]) => void;
+  disabled?: boolean;
+}) {
+  const togglePosition = (position: Position) => {
+    onChange(
+      positions.includes(position)
+        ? positions.filter((item) => item !== position)
+        : [...positions, position],
+    );
+  };
+
+  const makePrimary = (position: Position) => {
+    onChange([position, ...positions.filter((item) => item !== position)]);
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-3">
+        {POSITION_GROUPS.map((department) => (
+          <fieldset key={department} className="rounded-xl border border-gray-200 p-3">
+            <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-ditch-navy/60">
+              {department}
+            </legend>
+            <div className="space-y-2">
+              {POSITIONS.filter((position) => POSITION_DEPARTMENTS[position] === department).map(
+                (position) => (
+                  <label
+                    key={position}
+                    className="flex cursor-pointer items-start gap-2 rounded-lg p-2 text-sm hover:bg-gray-50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={positions.includes(position)}
+                      disabled={disabled}
+                      onChange={() => togglePosition(position)}
+                      className="mt-0.5 rounded border-gray-300 text-ditch-orange focus:ring-ditch-orange"
+                    />
+                    <span>
+                      <span className="font-medium text-gray-900">{position}</span>
+                      {POSITION_NOTES[position] && (
+                        <span className="block text-xs text-gray-500">{POSITION_NOTES[position]}</span>
+                      )}
+                    </span>
+                  </label>
+                ),
+              )}
+            </div>
+          </fieldset>
+        ))}
+      </div>
+
+      {positions.length > 0 ? (
+        <div className="rounded-xl border border-ditch-orange/20 bg-ditch-orange/5 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-ditch-navy/60">
+            Position order
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {positions.map((position, index) => (
+              <span
+                key={position}
+                className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-medium text-ditch-navy shadow-sm ring-1 ring-ditch-navy/10"
+              >
+                {position}
+                {index === 0 ? (
+                  <span className="text-ditch-orange">Primary</span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => makePrimary(position)}
+                    className="text-ditch-navy/50 underline-offset-2 hover:text-ditch-orange hover:underline disabled:cursor-not-allowed"
+                  >
+                    Make primary
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-gray-600">
+            The first position is primary. This employee will receive {positions.length} separate
+            position {positions.length === 1 ? "final" : "finals"}, one for each job.
+          </p>
+        </div>
+      ) : (
+        <p className="text-xs text-gray-500">
+          No floor position selected. All-team training can still be assigned, but no position final will appear.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [allPaths, setAllPaths] = useState<any[]>([]);
+  const [allPaths, setAllPaths] = useState<TrainingPath[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showPathModal, setShowPathModal] = useState(false);
@@ -68,20 +184,30 @@ export default function EmployeesPage() {
   const [positionFilter, setPositionFilter] = useState("");
   const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    fetchData();
-  }, []);
+  const [positionDraft, setPositionDraft] = useState<Position[]>([]);
+  const [positionSaveError, setPositionSaveError] = useState("");
+  const [savingPositions, setSavingPositions] = useState(false);
 
   const fetchData = async () => {
-    const [empRes, pathRes] = await Promise.all([
-      fetch("/api/admin/employees"),
-      fetch("/api/admin/paths"),
-    ]);
-    setEmployees(await empRes.json());
-    setAllPaths(await pathRes.json());
+    const data = await loadCrewData();
+    setEmployees(data.employees);
+    setAllPaths(data.paths);
     setLoading(false);
+    return data.employees;
   };
+
+  useEffect(() => {
+    let ignore = false;
+    void loadCrewData().then((data) => {
+      if (ignore) return;
+      setEmployees(data.employees);
+      setAllPaths(data.paths);
+      setLoading(false);
+    });
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   const openNew = () => {
     setForm({ ...emptyForm });
@@ -148,6 +274,14 @@ export default function EmployeesPage() {
 
   const openPathManager = (emp: Employee) => {
     setSelectedEmployee(emp);
+    setPositionDraft(
+      emp.positions?.length > 0
+        ? [...emp.positions]
+        : emp.position
+          ? [emp.position]
+          : [],
+    );
+    setPositionSaveError("");
     setShowPathModal(true);
   };
 
@@ -158,12 +292,8 @@ export default function EmployeesPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ trainingPathId: pathId }),
     });
-    fetchData();
-    // Refresh selected employee data
-    const res = await fetch("/api/admin/employees");
-    const updated = await res.json();
-    setEmployees(updated);
-    setSelectedEmployee(updated.find((e: any) => e.id === selectedEmployee.id) || null);
+    const updated = await fetchData();
+    setSelectedEmployee(updated.find((employee) => employee.id === selectedEmployee.id) || null);
   };
 
   const removePath = async (pathId: string) => {
@@ -171,11 +301,8 @@ export default function EmployeesPage() {
     await fetch(`/api/admin/employees/${selectedEmployee.id}/paths?trainingPathId=${pathId}`, {
       method: "DELETE",
     });
-    fetchData();
-    const res = await fetch("/api/admin/employees");
-    const updated = await res.json();
-    setEmployees(updated);
-    setSelectedEmployee(updated.find((e: any) => e.id === selectedEmployee.id) || null);
+    const updated = await fetchData();
+    setSelectedEmployee(updated.find((employee) => employee.id === selectedEmployee.id) || null);
   };
 
   const toggleFormPath = (pathId: string) => {
@@ -196,22 +323,40 @@ export default function EmployeesPage() {
       `${emp.firstName} ${emp.lastName}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
       emp.email.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesRole = !roleFilter || emp.role === roleFilter;
-    const matchesPosition = !positionFilter || emp.position === positionFilter;
+    const positions = emp.positions?.length > 0
+      ? emp.positions
+      : emp.position
+        ? [emp.position]
+        : [];
+    const matchesPosition = !positionFilter || positions.includes(positionFilter as Position);
     return matchesSearch && matchesRole && matchesPosition;
   });
 
-  const updatePosition = async (empId: string, position: Position | "") => {
-    await fetch(`/api/admin/employees/${empId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ position: position || null }),
-    });
-    setEmployees((prev) =>
-      prev.map((e) => (e.id === empId ? { ...e, position: (position || null) as Position | null } : e))
-    );
-    setSelectedEmployee((prev) =>
-      prev && prev.id === empId ? { ...prev, position: (position || null) as Position | null } : prev
-    );
+  const savePositions = async () => {
+    if (!selectedEmployee) return;
+    setSavingPositions(true);
+    setPositionSaveError("");
+    try {
+      const response = await fetch(`/api/admin/employees/${selectedEmployee.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ positions: positionDraft }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        setPositionSaveError(body?.error || "Could not update this employee's positions.");
+        return;
+      }
+
+      const updated = await fetchData();
+      const refreshed = updated.find((employee) => employee.id === selectedEmployee.id) || null;
+      setSelectedEmployee(refreshed);
+      setPositionDraft(refreshed?.positions || []);
+    } catch {
+      setPositionSaveError("Could not update positions. Check your connection and try again.");
+    } finally {
+      setSavingPositions(false);
+    }
   };
 
   const roleOptions = [
@@ -265,8 +410,8 @@ export default function EmployeesPage() {
         <EmptyState
           icon={Users}
           title="No Employees Found"
-          description={searchQuery || roleFilter ? "Try adjusting your filters." : "Add your first team member."}
-          action={!searchQuery && !roleFilter ? <Button onClick={openNew}><Plus className="w-4 h-4 mr-2" /> Add Employee</Button> : undefined}
+          description={searchQuery || roleFilter || positionFilter ? "Try adjusting your filters." : "Add your first team member."}
+          action={!searchQuery && !roleFilter && !positionFilter ? <Button onClick={openNew}><Plus className="w-4 h-4 mr-2" /> Add Employee</Button> : undefined}
         />
       ) : (
         <div className="space-y-3">
@@ -280,12 +425,22 @@ export default function EmployeesPage() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-medium text-gray-900">{emp.firstName} {emp.lastName}</p>
                     <Badge>{emp.role}</Badge>
-                    {emp.position && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-ditch-navy/10 text-ditch-navy rounded-full text-xs font-medium">
-                        <Briefcase className="w-3 h-3" />
-                        {emp.position}
+                    {(emp.positions?.length > 0
+                      ? emp.positions
+                      : emp.position
+                        ? [emp.position]
+                        : []
+                    ).map((position, index) => (
+                      <span
+                        key={position}
+                        className="inline-flex items-center gap-1 rounded-full bg-ditch-navy/10 px-2 py-0.5 text-xs font-medium text-ditch-navy"
+                        title={index === 0 ? "Primary position" : "Additional position"}
+                      >
+                        <Briefcase className="h-3 w-3" />
+                        {position}
+                        {index === 0 && <span className="text-ditch-orange">Primary</span>}
                       </span>
-                    )}
+                    ))}
                     {emp.isActive ? <Badge variant="completed">Active</Badge> : <Badge>Inactive</Badge>}
                   </div>
                   <p className="text-xs text-gray-400">{emp.email}{emp.location ? ` · ${emp.location}` : ""}</p>
@@ -369,16 +524,19 @@ export default function EmployeesPage() {
                 { value: "SUPER_ADMIN", label: "Super Admin" },
               ]}
             />
-            <Select
-              label="Position (floor job)"
-              value={form.position}
-              onChange={(e) => setForm({ ...form, position: e.target.value as Position | "" })}
-              options={POSITION_OPTIONS}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
             <Input label="Location" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="Bay Shore" />
-            <Input label="Phone" type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="(631) 555-1234" />
+          </div>
+          <Input label="Phone" type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="(631) 555-1234" />
+
+          <div className="pt-3 border-t">
+            <label className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700">
+              <Briefcase className="h-4 w-4" /> Positions (floor jobs)
+            </label>
+            <PositionPicker
+              positions={form.positions}
+              onChange={(positions) => setForm((current) => ({ ...current, positions }))}
+              disabled={saving}
+            />
           </div>
 
           {/* Training Path Assignment */}
@@ -387,7 +545,7 @@ export default function EmployeesPage() {
               <Route className="w-4 h-4" /> Assign Training Paths
             </label>
             <div className="space-y-2 max-h-[200px] overflow-y-auto border rounded-lg p-2">
-              {allPaths.map((path: any) => (
+              {allPaths.map((path) => (
                 <label key={path.id} className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded-lg cursor-pointer">
                   <input
                     type="checkbox"
@@ -414,23 +572,42 @@ export default function EmployeesPage() {
       {/* Training Path Manager Modal */}
       <Modal
         isOpen={showPathModal}
-        onClose={() => { setShowPathModal(false); setSelectedEmployee(null); }}
+        onClose={() => {
+          setShowPathModal(false);
+          setSelectedEmployee(null);
+          setPositionDraft([]);
+          setPositionSaveError("");
+        }}
         title={selectedEmployee ? `Training — ${selectedEmployee.firstName} ${selectedEmployee.lastName}` : "Manage Training"}
         size="lg"
       >
         {selectedEmployee && (
           <div className="space-y-4">
-            {/* Position */}
-            <div>
-              <Select
-                label="Position (floor job)"
-                value={selectedEmployee.position || ""}
-                onChange={(e) => updatePosition(selectedEmployee.id, e.target.value as Position | "")}
-                options={POSITION_OPTIONS}
+            {/* Positions */}
+            <div className="space-y-3">
+              <div>
+                <p className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <Briefcase className="h-4 w-4" /> Positions (floor jobs)
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  Positions drive automatic learning paths and finals. They are separate from the employee&apos;s permission role.
+                </p>
+              </div>
+              {positionSaveError && (
+                <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">
+                  {positionSaveError}
+                </div>
+              )}
+              <PositionPicker
+                positions={positionDraft}
+                onChange={setPositionDraft}
+                disabled={savingPositions}
               />
-              <p className="text-xs text-gray-500 mt-1">
-                Drives training path auto-assignment and floor scheduling. Separate from permission role.
-              </p>
+              <div className="flex justify-end">
+                <Button onClick={savePositions} disabled={savingPositions}>
+                  {savingPositions ? "Saving positions…" : "Save positions"}
+                </Button>
+              </div>
             </div>
 
             {/* Per-employee settings */}
@@ -487,13 +664,13 @@ export default function EmployeesPage() {
               <h3 className="text-sm font-medium text-gray-700 mb-2">Add Training Path</h3>
               {(() => {
                 const assignedIds = new Set(selectedEmployee.trainingPaths.map((p) => p.id));
-                const available = allPaths.filter((p: any) => !assignedIds.has(p.id));
+                const available = allPaths.filter((path) => !assignedIds.has(path.id));
                 if (available.length === 0) {
                   return <p className="text-sm text-gray-400">All available training paths are assigned.</p>;
                 }
                 return (
                   <div className="space-y-2">
-                    {available.map((path: any) => (
+                    {available.map((path) => (
                       <button
                         key={path.id}
                         onClick={() => assignPath(path.id)}

@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   BookOpen, Users, Coffee, UtensilsCrossed, Shield,
-  ClipboardList, Wine, AlertCircle, Heart, Lock, CheckCircle2,
+  ClipboardList, Wine, AlertCircle, Heart, CheckCircle2,
 } from "lucide-react";
 import { PalomaMan } from "@/components/paloma-man";
 import { canManageTraining, getAssignedModuleIds } from "@/lib/training-access";
@@ -65,6 +65,52 @@ export default async function TrainingLibraryPage() {
 
   const completedIds = new Set((completionsData || []).map((c: any) => c.moduleId));
 
+  const { data: activeAssessments, error: assessmentsError } = await db
+    .from("Quiz")
+    .select("id, quizType, moduleId, sectionId, assessmentVersion")
+    .eq("isActive", true)
+    .in("quizType", ["MODULE", "SECTION"]);
+  if (assessmentsError) throw new Error("Unable to load curriculum mastery");
+
+  const assessmentIds = (activeAssessments || []).map((quiz) => quiz.id);
+  const { data: passedAttempts, error: attemptsError } = assessmentIds.length > 0
+    ? await db
+        .from("QuizAttempt")
+        .select("quizId, assessmentVersion")
+        .eq("userId", userId)
+        .eq("passed", true)
+        .in("quizId", assessmentIds)
+    : { data: [], error: null };
+  if (attemptsError) throw new Error("Unable to load current assessment progress");
+
+  const versionByQuiz = new Map(
+    (activeAssessments || []).map((quiz) => [quiz.id, quiz.assessmentVersion]),
+  );
+  const passedQuizIds = new Set(
+    (passedAttempts || [])
+      .filter(
+        (attempt) =>
+          versionByQuiz.get(attempt.quizId) === attempt.assessmentVersion,
+      )
+      .map((attempt) => attempt.quizId),
+  );
+  const moduleQuizByModuleId = new Map(
+    (activeAssessments || [])
+      .filter((quiz) => quiz.quizType === "MODULE" && quiz.moduleId)
+      .map((quiz) => [quiz.moduleId as string, quiz]),
+  );
+  const sectionQuizBySectionId = new Map(
+    (activeAssessments || [])
+      .filter((quiz) => quiz.quizType === "SECTION" && quiz.sectionId)
+      .map((quiz) => [quiz.sectionId as string, quiz]),
+  );
+  const masteredModuleIds = new Set(
+    Array.from(completedIds).filter((moduleId) => {
+      const moduleQuiz = moduleQuizByModuleId.get(moduleId);
+      return !!moduleQuiz && passedQuizIds.has(moduleQuiz.id);
+    }),
+  );
+
   // Filter sections: only include sections that have at least one assigned module
   // Admins see everything
   const sections = (allSections || [])
@@ -82,9 +128,15 @@ export default async function TrainingLibraryPage() {
     })
     .filter((section: any) => section.modules.length > 0);
 
-  // Section completion check
-  const sectionComplete = (section: any) =>
-    section.modules.length > 0 && section.modules.every((m: any) => completedIds.has(m.id));
+  // Each assigned position is an independent program. A user carrying two jobs
+  // can work either path without one position cross-locking the other.
+  const sectionComplete = (section: any) => {
+    const sectionQuiz = sectionQuizBySectionId.get(section.id);
+    return section.modules.length > 0 &&
+      section.modules.every((module: any) => masteredModuleIds.has(module.id)) &&
+      !!sectionQuiz &&
+      passedQuizIds.has(sectionQuiz.id);
+  };
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -94,7 +146,7 @@ export default async function TrainingLibraryPage() {
         <div>
           <p className="page-kicker">The Ditch playbook</p>
           <h1 className="page-title">Learn it. Practice it. Own it.</h1>
-          <p className="page-subtitle">Work through your lineup in order. These are the reps that turn standards into muscle memory.</p>
+          <p className="page-subtitle">Work through each assigned program. Every module check builds toward that position&apos;s final.</p>
         </div>
         <div className="hidden sm:block shrink-0">
           <PalomaMan size="sm" message="One rep at a time. Consistency is the cheat code." />
@@ -107,27 +159,8 @@ export default async function TrainingLibraryPage() {
         {sections.map((section: any, index: number) => {
           const Icon = sectionIcons[section.slug] || BookOpen;
           const totalModules = section.modules.length;
-          const completedModules = section.modules.filter((m: any) => completedIds.has(m.id)).length;
+          const completedModules = section.modules.filter((m: any) => masteredModuleIds.has(m.id)).length;
           const isComplete = sectionComplete(section);
-          const previousComplete = index === 0 || sectionComplete(sections[index - 1]);
-          const isAccessible = isAdmin || isComplete || previousComplete;
-
-          if (!isAccessible) {
-            return (
-              <Card key={section.id} className="border-dashed bg-white/50 opacity-65 shadow-none">
-                <div className="flex items-center gap-4">
-                  <div className="grid size-12 shrink-0 place-items-center rounded-2xl bg-ditch-navy/[0.05]">
-                    <Lock className="size-5 text-ditch-navy/35" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="mb-1 text-[9px] font-extrabold uppercase tracking-[0.18em] text-ditch-navy/35">Stage {String(index + 1).padStart(2, "0")} · Locked</p>
-                    <h3 className="font-extrabold text-ditch-navy/45">{section.title}</h3>
-                    <p className="mt-1 text-xs text-ditch-navy/35">Finish the previous stage to unlock · {totalModules} modules</p>
-                  </div>
-                </div>
-              </Card>
-            );
-          }
 
           return (
             <Link key={section.id} href={`/training/${section.slug}`}>
@@ -141,7 +174,7 @@ export default async function TrainingLibraryPage() {
                     )}
                   </div>
                   <div className="min-w-0 flex-1 p-4 sm:p-5">
-                    <p className="mb-1 text-[9px] font-extrabold uppercase tracking-[0.18em] text-ditch-orange">Stage {String(index + 1).padStart(2, "0")}</p>
+                    <p className="mb-1 text-[9px] font-extrabold uppercase tracking-[0.18em] text-ditch-orange">Program {String(index + 1).padStart(2, "0")}</p>
                     <div className="flex items-center gap-2">
                       <h3 className="font-extrabold tracking-tight text-ditch-ink">{section.title}</h3>
                       {isComplete && <Badge variant="completed">Complete</Badge>}
@@ -150,7 +183,7 @@ export default async function TrainingLibraryPage() {
                     <div className="flex items-center gap-3 mt-3">
                       <span className="text-[11px] font-medium text-ditch-navy/45">{totalModules} modules</span>
                       {completedModules > 0 && !isComplete && (
-                        <Badge variant="in-progress">{completedModules}/{totalModules} done</Badge>
+                        <Badge variant="in-progress">{completedModules}/{totalModules} mastered</Badge>
                       )}
                     </div>
                   </div>

@@ -1,4 +1,5 @@
 export * from "./types";
+export * from "./assessment-bank";
 export * from "./sources";
 export * from "./menu";
 export * from "./hospitality-reset";
@@ -9,6 +10,13 @@ export * from "./onboarding";
 export * from "./render";
 
 import { HOSPITALITY_RESET_MODULES, HOSPITALITY_RESET_PROGRAM } from "./hospitality-reset";
+import {
+  buildModuleAssessmentBanks,
+  buildPositionFinalAssessmentBanks,
+  buildSectionAssessmentBanks,
+  validateAssessmentBanks,
+} from "./assessment-bank";
+import { POSITIONS } from "../positions";
 import { LEADERSHIP_MODULES, LEADERSHIP_PROGRAM } from "./leadership";
 import { MASTERMIND_CYCLES, MASTERMIND_MODULES, MASTERMIND_PROGRAM } from "./masterminds";
 import { COCKTAIL_MENU, FOOD_MENU_ITEMS } from "./menu";
@@ -46,6 +54,22 @@ export const CURRICULUM_PROGRAMS = [
 ] as const satisfies readonly CurriculumProgram[];
 
 export const MENU_ITEMS = [...FOOD_MENU_ITEMS, ...COCKTAIL_MENU] as const;
+
+export const MODULE_ASSESSMENT_BANKS = buildModuleAssessmentBanks(
+  CURRICULUM_MODULES,
+  MENU_ITEMS,
+);
+
+export const SECTION_ASSESSMENT_BANKS = buildSectionAssessmentBanks(
+  CURRICULUM_PROGRAMS,
+  MODULE_ASSESSMENT_BANKS,
+);
+
+export const POSITION_FINAL_ASSESSMENT_BANKS = buildPositionFinalAssessmentBanks(
+  POSITIONS,
+  CURRICULUM_PROGRAMS,
+  MODULE_ASSESSMENT_BANKS,
+);
 
 export const CURRICULUM_MODULE_BY_ID = new Map(
   CURRICULUM_MODULES.map((curriculumModule) => [curriculumModule.id, curriculumModule])
@@ -183,6 +207,17 @@ export function validateCurriculum(): CurriculumValidationIssue[] {
       issues.push({ code: "mastermind-day-sequence", message: `${cycle.id} must use days 1 through 10 exactly once` });
     }
   }
+
+  issues.push(
+    ...validateAssessmentBanks(
+      CURRICULUM_MODULES,
+      CURRICULUM_PROGRAMS,
+      POSITIONS,
+      MODULE_ASSESSMENT_BANKS,
+      SECTION_ASSESSMENT_BANKS,
+      POSITION_FINAL_ASSESSMENT_BANKS,
+    ),
+  );
 
   return issues;
 }

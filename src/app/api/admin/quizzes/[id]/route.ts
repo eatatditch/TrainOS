@@ -3,9 +3,12 @@ import { db } from "@/lib/db";
 import { ADMIN_ROLES, authorizeApi } from "@/lib/api-auth";
 import {
   isQuizEntityId,
+  MIN_QUIZ_QUESTIONS,
   type QuizQuestionInput,
   validateQuizWritePayload,
 } from "@/lib/quiz-integrity";
+
+type QuizType = "MODULE" | "SECTION" | "POSITION_FINAL" | "STANDALONE";
 
 interface StoredQuiz {
   id: string;
@@ -16,6 +19,11 @@ interface StoredQuiz {
   passingScore: number;
   retryLimit: number;
   isRequired: boolean;
+  quizType: QuizType;
+  position: string | null;
+  assessmentVersion: number;
+  isActive: boolean;
+  isSystemManaged: boolean;
 }
 
 interface StoredQuestion {
@@ -27,11 +35,22 @@ interface StoredQuestion {
   correctAnswer: string;
   explanation: string | null;
   sortOrder: number;
+  sourceModuleId: string | null;
+}
+
+function deriveManualQuizType(
+  moduleId: string | null,
+  sectionId: string | null,
+): Exclude<QuizType, "POSITION_FINAL"> {
+  if (moduleId) return "MODULE";
+  if (sectionId) return "SECTION";
+  return "STANDALONE";
 }
 
 function questionMutationRow(
   question: QuizQuestionInput,
   sortOrder: number,
+  sourceModuleId: string | null,
 ) {
   return {
     questionText: question.questionText,
@@ -40,6 +59,7 @@ function questionMutationRow(
     correctAnswer: question.correctAnswer,
     explanation: question.explanation,
     sortOrder,
+    sourceModuleId,
   };
 }
 
@@ -51,6 +71,7 @@ function storedQuestionMutationRow(question: StoredQuestion) {
     correctAnswer: question.correctAnswer,
     explanation: question.explanation,
     sortOrder: question.sortOrder,
+    sourceModuleId: question.sourceModuleId,
   };
 }
 
@@ -61,7 +82,7 @@ async function validateAssociation(
   if (moduleId) {
     const { data, error } = await db
       .from("Module")
-      .select("id")
+      .select("id, isActive")
       .eq("id", moduleId)
       .maybeSingle();
     if (error) {
@@ -76,12 +97,18 @@ async function validateAssociation(
         { status: 400 },
       );
     }
+    if (!data.isActive) {
+      return NextResponse.json(
+        { error: "Linked module is archived" },
+        { status: 400 },
+      );
+    }
   }
 
   if (sectionId) {
     const { data, error } = await db
       .from("Section")
-      .select("id")
+      .select("id, isActive")
       .eq("id", sectionId)
       .maybeSingle();
     if (error) {
@@ -93,6 +120,12 @@ async function validateAssociation(
     if (!data) {
       return NextResponse.json(
         { error: "Linked section was not found" },
+        { status: 400 },
+      );
+    }
+    if (!data.isActive) {
+      return NextResponse.json(
+        { error: "Linked section is archived" },
         { status: 400 },
       );
     }
@@ -112,6 +145,11 @@ async function restoreQuizMetadata(quiz: StoredQuiz): Promise<boolean> {
       passingScore: quiz.passingScore,
       retryLimit: quiz.retryLimit,
       isRequired: quiz.isRequired,
+      quizType: quiz.quizType,
+      position: quiz.position,
+      assessmentVersion: quiz.assessmentVersion,
+      isActive: quiz.isActive,
+      isSystemManaged: quiz.isSystemManaged,
     })
     .eq("id", quiz.id)
     .select("id")
@@ -194,6 +232,43 @@ export async function PUT(
   }
   const existing = existingData as StoredQuiz;
 
+  if (existing.isSystemManaged || existing.quizType === "POSITION_FINAL") {
+    return NextResponse.json(
+      {
+        error:
+          "This assessment is managed by the authoritative curriculum and cannot be edited here",
+      },
+      { status: 409 },
+    );
+  }
+  if (!existing.isActive) {
+    return NextResponse.json(
+      { error: "Archived quizzes are read-only" },
+      { status: 409 },
+    );
+  }
+
+  if (!changes.questions) {
+    const { count, error: questionCountError } = await db
+      .from("QuizQuestion")
+      .select("id", { count: "exact", head: true })
+      .eq("quizId", id);
+    if (questionCountError) {
+      return NextResponse.json(
+        { error: "Unable to validate the quiz question count" },
+        { status: 500 },
+      );
+    }
+    if ((count ?? 0) < MIN_QUIZ_QUESTIONS) {
+      return NextResponse.json(
+        {
+          error: `Add at least ${MIN_QUIZ_QUESTIONS} valid questions before updating this quiz`,
+        },
+        { status: 400 },
+      );
+    }
+  }
+
   const finalModuleId =
     changes.moduleId !== undefined ? changes.moduleId : existing.moduleId;
   const finalSectionId =
@@ -210,6 +285,23 @@ export async function PUT(
     finalSectionId,
   );
   if (associationError) return associationError;
+
+  const finalQuizType = deriveManualQuizType(finalModuleId, finalSectionId);
+  const scopeChanged =
+    finalModuleId !== existing.moduleId ||
+    finalSectionId !== existing.sectionId ||
+    finalQuizType !== existing.quizType;
+  if (scopeChanged && !changes.questions) {
+    return NextResponse.json(
+      { error: "Include the complete question bank when changing quiz scope" },
+      { status: 400 },
+    );
+  }
+  const assessmentChanged =
+    changes.questions !== undefined ||
+    scopeChanged ||
+    (changes.passingScore !== undefined &&
+      changes.passingScore !== existing.passingScore);
 
   const updatePayload: Record<string, string | number | boolean | null> = {};
   if (changes.title !== undefined) updatePayload.title = changes.title;
@@ -229,6 +321,10 @@ export async function PUT(
   if (changes.sectionId !== undefined) {
     updatePayload.sectionId = changes.sectionId;
   }
+  if (scopeChanged) updatePayload.quizType = finalQuizType;
+  if (assessmentChanged) {
+    updatePayload.assessmentVersion = existing.assessmentVersion + 1;
+  }
 
   let quiz: StoredQuiz = existing;
   const metadataChanged = Object.keys(updatePayload).length > 0;
@@ -240,9 +336,14 @@ export async function PUT(
       .select()
       .single();
     if (updateError || !updatedData) {
+      const associationConflict = updateError?.code === "23505";
       return NextResponse.json(
-        { error: "Unable to update the quiz" },
-        { status: 500 },
+        {
+          error: associationConflict
+            ? "That module or section already has an active assessment"
+            : "Unable to update the quiz",
+        },
+        { status: associationConflict ? 409 : 500 },
       );
     }
     quiz = updatedData as StoredQuiz;
@@ -302,7 +403,7 @@ export async function PUT(
         .insert(
           newQuestions.map(({ question, sortOrder }) => ({
             quizId: id,
-            ...questionMutationRow(question, sortOrder),
+            ...questionMutationRow(question, sortOrder, finalModuleId),
           })),
         )
         .select("id");
@@ -353,7 +454,7 @@ export async function PUT(
 
       const { data: updatedQuestion, error: questionUpdateError } = await db
         .from("QuizQuestion")
-        .update(questionMutationRow(question, sortOrder))
+        .update(questionMutationRow(question, sortOrder, finalModuleId))
         .eq("id", question.id)
         .eq("quizId", id)
         .select("id")
@@ -439,26 +540,48 @@ export async function DELETE(
     return NextResponse.json({ error: "Invalid quiz ID" }, { status: 400 });
   }
 
-  const { data: deleted, error } = await db
+  const { data: existing, error: loadError } = await db
     .from("Quiz")
-    .delete()
+    .select("id, isActive, isSystemManaged, quizType")
     .eq("id", id)
-    .select("id");
-  if (error) {
+    .maybeSingle();
+  if (loadError) {
     return NextResponse.json(
-      { error: "Unable to delete the quiz" },
+      { error: "Unable to load the quiz" },
       { status: 500 },
     );
   }
-  if (!deleted || deleted.length === 0) {
+  if (!existing) {
     return NextResponse.json({ error: "Quiz not found" }, { status: 404 });
   }
-  if (deleted.length !== 1) {
+
+  if (existing.isSystemManaged || existing.quizType === "POSITION_FINAL") {
     return NextResponse.json(
-      { error: "Unexpected quiz deletion result" },
+      {
+        error:
+          "This assessment is managed by the authoritative curriculum and cannot be archived here",
+      },
+      { status: 409 },
+    );
+  }
+
+  if (!existing.isActive) {
+    return NextResponse.json({ success: true, archived: true });
+  }
+
+  const { data: archived, error: archiveError } = await db
+    .from("Quiz")
+    .update({ isActive: false, isRequired: false })
+    .eq("id", id)
+    .eq("isActive", true)
+    .select("id")
+    .maybeSingle();
+  if (archiveError || !archived) {
+    return NextResponse.json(
+      { error: "Unable to archive the quiz" },
       { status: 500 },
     );
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, archived: true });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -26,12 +26,15 @@ interface QuizResult {
   feedback: Record<string, QuizFeedback>;
   attemptsRemaining: number | null;
   canRetry: boolean;
+  revealAnswers: boolean;
 }
 
 interface QuizTakerProps {
   quizId: string;
   questions: Question[];
   passingScore: number;
+  assessmentType: "MODULE" | "SECTION" | "POSITION_FINAL" | "STANDALONE";
+  draftKey: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -46,7 +49,8 @@ function parseQuizResult(value: unknown): QuizResult | null {
     !isRecord(value.feedback) ||
     (value.attemptsRemaining !== null &&
       typeof value.attemptsRemaining !== "number") ||
-    typeof value.canRetry !== "boolean"
+    typeof value.canRetry !== "boolean" ||
+    typeof value.revealAnswers !== "boolean"
   ) {
     return null;
   }
@@ -62,13 +66,59 @@ async function readResponseBody(response: Response): Promise<unknown> {
   }
 }
 
-export function QuizTaker({ quizId, questions, passingScore }: QuizTakerProps) {
+export function QuizTaker({
+  quizId,
+  questions,
+  passingScore,
+  assessmentType,
+  draftKey,
+}: QuizTakerProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [draftLoaded, setDraftLoaded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [result, setResult] = useState<QuizResult | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    const restoreTimer = window.setTimeout(() => {
+      try {
+        const savedDraft = window.localStorage.getItem(draftKey);
+        if (savedDraft) {
+          const parsed = JSON.parse(savedDraft) as unknown;
+          if (isRecord(parsed)) {
+            const questionIds = new Set(questions.map((question) => question.id));
+            const restored = Object.fromEntries(
+              Object.entries(parsed).filter(
+                ([questionId, answer]) =>
+                  questionIds.has(questionId) && typeof answer === "string",
+              ),
+            ) as Record<string, string>;
+            setAnswers(restored);
+          }
+        }
+      } catch {
+        // A disabled or corrupt local store should never block an assessment.
+      } finally {
+        setDraftLoaded(true);
+      }
+    }, 0);
+    return () => window.clearTimeout(restoreTimer);
+  }, [draftKey, questions]);
+
+  useEffect(() => {
+    if (!draftLoaded || result) return;
+    try {
+      if (Object.keys(answers).length === 0) {
+        window.localStorage.removeItem(draftKey);
+      } else {
+        window.localStorage.setItem(draftKey, JSON.stringify(answers));
+      }
+    } catch {
+      // Draft persistence is a convenience, never a submission requirement.
+    }
+  }, [answers, draftKey, draftLoaded, result]);
 
   const answeredCount = questions.reduce(
     (count, question) =>
@@ -112,6 +162,11 @@ export function QuizTaker({ quizId, questions, passingScore }: QuizTakerProps) {
         );
         return;
       }
+      try {
+        window.localStorage.removeItem(draftKey);
+      } catch {
+        // The server already recorded the attempt; local cleanup is best effort.
+      }
       setResult(parsedResult);
     } catch {
       setSubmissionError(
@@ -128,6 +183,11 @@ export function QuizTaker({ quizId, questions, passingScore }: QuizTakerProps) {
     setAnswers({});
     setCurrentIndex(0);
     setSubmissionError(null);
+    try {
+      window.localStorage.removeItem(draftKey);
+    } catch {
+      // Best-effort cleanup only.
+    }
   };
 
   if (questions.length === 0) {
@@ -195,59 +255,70 @@ export function QuizTaker({ quizId, questions, passingScore }: QuizTakerProps) {
           </div>
         </Card>
 
-        <div className="space-y-3">
-          <h3 className="text-lg font-extrabold text-ditch-ink">
-            Review your answers
-          </h3>
-          {questions.map((question, index) => {
-            const feedback = result.feedback[question.id];
-            return (
-              <Card
-                key={question.id}
-                className={
-                  feedback?.correct
-                    ? "border-l-4 border-l-ditch-green"
-                    : "border-l-4 border-l-red-500"
-                }
-              >
-                <div className="flex items-start gap-3">
-                  <span className="text-sm font-semibold text-gray-400">
-                    Q{index + 1}
-                  </span>
-                  <div className="flex-1">
-                    <p className="font-medium text-gray-900">
-                      {question.questionText}
-                    </p>
-                    <p className="mt-1 text-sm">
-                      Your answer:{" "}
-                      <span className="font-medium">
-                        {answers[question.id] || "—"}
-                      </span>
-                    </p>
-                    {!feedback?.correct ? (
-                      <p className="mt-1 text-sm text-ditch-green">
-                        Correct answer:{" "}
+        {result.revealAnswers ? (
+          <div className="space-y-3">
+            <h3 className="text-lg font-extrabold text-ditch-ink">
+              Review your answers
+            </h3>
+            {questions.map((question, index) => {
+              const feedback = result.feedback[question.id];
+              return (
+                <Card
+                  key={question.id}
+                  className={
+                    feedback?.correct
+                      ? "border-l-4 border-l-ditch-green"
+                      : "border-l-4 border-l-red-500"
+                  }
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="text-sm font-semibold text-gray-400">
+                      Q{index + 1}
+                    </span>
+                    <div className="flex-1">
+                      <p className="font-medium text-gray-900">
+                        {question.questionText}
+                      </p>
+                      <p className="mt-1 text-sm">
+                        Your answer:{" "}
                         <span className="font-medium">
-                          {feedback?.correctAnswer}
+                          {answers[question.id] || "—"}
                         </span>
                       </p>
-                    ) : null}
-                    {feedback?.explanation ? (
-                      <p className="mt-1 text-sm italic text-gray-500">
-                        {feedback.explanation}
-                      </p>
-                    ) : null}
+                      {!feedback?.correct ? (
+                        <p className="mt-1 text-sm text-ditch-green">
+                          Correct answer:{" "}
+                          <span className="font-medium">
+                            {feedback?.correctAnswer}
+                          </span>
+                        </p>
+                      ) : null}
+                      {feedback?.explanation ? (
+                        <p className="mt-1 text-sm italic text-gray-500">
+                          {feedback.explanation}
+                        </p>
+                      ) : null}
+                    </div>
+                    {feedback?.correct ? (
+                      <CheckCircle2 className="size-5 shrink-0 text-ditch-green" />
+                    ) : (
+                      <XCircle className="size-5 shrink-0 text-red-500" />
+                    )}
                   </div>
-                  {feedback?.correct ? (
-                    <CheckCircle2 className="size-5 shrink-0 text-ditch-green" />
-                  ) : (
-                    <XCircle className="size-5 shrink-0 text-red-500" />
-                  )}
-                </div>
-              </Card>
-            );
-          })}
-        </div>
+                </Card>
+              );
+            })}
+          </div>
+        ) : (
+          <Card className="border-ditch-orange/20 bg-ditch-sand/25">
+            <h3 className="font-extrabold text-ditch-ink">Final review stays protected</h3>
+            <p className="mt-1 text-sm leading-6 text-ditch-navy/65">
+              Correct answers are available after you pass or use the final
+              attempt. Review the assigned modules and checkpoints before your
+              next try.
+            </p>
+          </Card>
+        )}
 
         <div className="flex flex-wrap gap-3">
           {result.canRetry ? (
@@ -418,7 +489,11 @@ export function QuizTaker({ quizId, questions, passingScore }: QuizTakerProps) {
             onClick={handleSubmit}
             disabled={submitting || !allAnswered}
           >
-            {submitting ? "Submitting..." : "Submit Quiz"}
+            {submitting
+              ? "Submitting..."
+              : assessmentType === "POSITION_FINAL"
+                ? "Submit Final"
+                : "Submit Quiz"}
           </Button>
         )}
       </div>

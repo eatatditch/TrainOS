@@ -63,25 +63,6 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
     : null;
   const isLastSection = currentIdx === sortedSections.length - 1;
 
-  // Enforce sequential section order — check if previous section is complete
-  if (!isAdmin && currentIdx > 0) {
-    const prevSection = sortedSections[currentIdx - 1];
-    const prevModuleIds = prevSection.modules.map((m: any) => m.id);
-
-    if (prevModuleIds.length > 0) {
-      const { data: prevCompletions } = await db
-        .from("ModuleCompletion")
-        .select("moduleId")
-        .eq("userId", userId)
-        .in("moduleId", prevModuleIds);
-
-      const prevCompletedCount = new Set((prevCompletions || []).map((c: any) => c.moduleId)).size;
-      if (prevCompletedCount < prevModuleIds.length) {
-        redirect("/training");
-      }
-    }
-  }
-
   const section = {
     ...sectionData,
     modules: visibleSectionModules,
@@ -92,7 +73,8 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
     .from("Quiz")
     .select("*, questions:QuizQuestion(*)")
     .eq("sectionId", sectionData.id)
-    .limit(1)
+    .eq("quizType", "SECTION")
+    .eq("isActive", true)
     .maybeSingle();
 
   // Fetch completions
@@ -107,7 +89,50 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
 
   const completedIds = new Set(completions.map((c: any) => c.moduleId));
   const completedCount = section.modules.filter((m: any) => completedIds.has(m.id)).length;
-  const allModulesComplete = completedCount === section.modules.length && section.modules.length > 0;
+
+  const sectionModuleIds = section.modules.map((module: any) => module.id);
+  const { data: moduleQuizzes, error: moduleQuizzesError } = await db
+    .from("Quiz")
+    .select("id, moduleId, assessmentVersion")
+    .eq("quizType", "MODULE")
+    .eq("isActive", true)
+    .in("moduleId", sectionModuleIds);
+  if (moduleQuizzesError) throw new Error("Unable to load module checks");
+
+  const moduleQuizIds = (moduleQuizzes || []).map((quiz) => quiz.id);
+  const { data: moduleAttempts, error: moduleAttemptsError } = moduleQuizIds.length > 0
+    ? await db
+        .from("QuizAttempt")
+        .select("quizId, assessmentVersion, passed")
+        .eq("userId", userId)
+        .eq("passed", true)
+        .in("quizId", moduleQuizIds)
+    : { data: [], error: null };
+  if (moduleAttemptsError) throw new Error("Unable to load module mastery");
+
+  const currentVersionByQuiz = new Map(
+    (moduleQuizzes || []).map((quiz) => [quiz.id, quiz.assessmentVersion]),
+  );
+  const passedModuleQuizIds = new Set(
+    (moduleAttempts || [])
+      .filter(
+        (attempt) =>
+          attempt.passed &&
+          currentVersionByQuiz.get(attempt.quizId) === attempt.assessmentVersion,
+      )
+      .map((attempt) => attempt.quizId),
+  );
+  const moduleQuizByModuleId = new Map(
+    (moduleQuizzes || []).map((quiz) => [quiz.moduleId, quiz]),
+  );
+  const masteredModuleIds = new Set(
+    sectionModuleIds.filter((moduleId: string) => {
+      const moduleQuiz = moduleQuizByModuleId.get(moduleId);
+      return completedIds.has(moduleId) && !!moduleQuiz && passedModuleQuizIds.has(moduleQuiz.id);
+    }),
+  );
+  const masteredCount = masteredModuleIds.size;
+  const allModulesMastered = masteredCount === section.modules.length && section.modules.length > 0;
 
   // Fetch quiz attempts if quiz exists
   let quizAttempts: any[] = [];
@@ -117,6 +142,7 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
       .select("*")
       .eq("userId", userId)
       .eq("quizId", sectionQuiz.id)
+      .eq("assessmentVersion", sectionQuiz.assessmentVersion)
       .order("completedAt", { ascending: false });
     quizAttempts = attempts || [];
   }
@@ -141,9 +167,9 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
         <div className="shell-card p-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-extrabold uppercase tracking-[0.12em] text-ditch-navy/60">Stage progress</span>
-            <span className="text-xs font-bold text-ditch-navy/45">{completedCount} of {section.modules.length} complete</span>
+            <span className="text-xs font-bold text-ditch-navy/45">{masteredCount} of {section.modules.length} mastered</span>
           </div>
-          <ProgressBar value={completedCount} max={section.modules.length} showLabel={false} />
+          <ProgressBar value={masteredCount} max={section.modules.length} showLabel={false} />
         </div>
       )}
 
@@ -151,8 +177,11 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
       <div className="space-y-3">
         {section.modules.map((mod: any, index: number) => {
           const isCompleted = completedIds.has(mod.id);
-          const previousCompleted = index === 0 || completedIds.has(section.modules[index - 1].id);
-          const isAccessible = isCompleted || previousCompleted;
+          const moduleQuiz = moduleQuizByModuleId.get(mod.id);
+          const quizPassed = !!moduleQuiz && passedModuleQuizIds.has(moduleQuiz.id);
+          const isMastered = isCompleted && quizPassed;
+          const previousMastered = index === 0 || masteredModuleIds.has(section.modules[index - 1].id);
+          const isAccessible = isMastered || previousMastered;
           const hasVideo = (mod.assets || []).some((a: any) => a.fileType === "VIDEO");
           const hasPDF = (mod.assets || []).some((a: any) => a.fileType === "PDF" || a.fileType === "DOCUMENT" || a.fileType === "CHECKLIST");
           const hasImages = (mod.assets || []).some((a: any) => a.fileType === "IMAGE");
@@ -167,7 +196,7 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
                   <div className="flex items-center gap-2">
                     <h3 className="truncate font-bold text-ditch-navy/45">{mod.title}</h3>
                   </div>
-                  <p className="text-sm text-gray-400 mt-0.5">Complete the previous module to unlock</p>
+                  <p className="text-sm text-gray-400 mt-0.5">Pass the previous module check to unlock</p>
                 </div>
               </Card>
             );
@@ -177,9 +206,9 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
             <Link key={mod.id} href={`/training/${sectionSlug}/${mod.slug}`}>
               <Card hover className="group flex items-center gap-4 sm:gap-5">
                 <div className={`grid size-12 shrink-0 place-items-center rounded-2xl ${
-                  isCompleted ? "bg-ditch-green text-white" : "bg-ditch-sand/60 text-ditch-orange"
+                  isMastered ? "bg-ditch-green text-white" : "bg-ditch-sand/60 text-ditch-orange"
                 }`}>
-                  {isCompleted ? (
+                  {isMastered ? (
                     <CheckCircle2 className="w-5 h-5" />
                   ) : (
                     <span className="text-sm font-semibold">{index + 1}</span>
@@ -189,7 +218,8 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
                   <div className="flex items-center gap-2">
                     <h3 className="truncate font-extrabold tracking-tight text-ditch-ink">{mod.title}</h3>
                     {mod.isRequired && <Badge variant="required">Required</Badge>}
-                    {isCompleted && <Badge variant="completed">Complete</Badge>}
+                    {isMastered && <Badge variant="completed">Mastered</Badge>}
+                    {isCompleted && !quizPassed && <Badge>Quiz ready</Badge>}
                   </div>
                   <p className="mt-1 truncate text-sm text-ditch-navy/55">{mod.description}</p>
                   <div className="flex items-center gap-3 mt-2">
@@ -221,16 +251,16 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
         })}
       </div>
 
-      {/* Section Quiz — at the bottom, gated by module completion */}
+      {/* Section checkpoint — gated by every current module check. */}
       {sectionQuiz && (
         <div className="pt-2">
           <div className="border-t border-gray-200 pt-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <ClipboardCheck className="w-5 h-5 text-ditch-orange" />
-              Section Quiz
+              Section Checkpoint
             </h2>
 
-            {allModulesComplete ? (
+            {allModulesMastered ? (
               <Card className={`border-l-4 ${hasPassed ? "border-l-ditch-green bg-green-50/30" : "border-l-ditch-orange"}`}>
                 <div className="flex items-start justify-between">
                   <div>
@@ -277,7 +307,7 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
                     className="inline-flex items-center gap-2 bg-ditch-orange text-white px-6 py-2.5 rounded-lg font-medium hover:bg-ditch-orange/90 transition-colors"
                   >
                     <ClipboardCheck className="w-4 h-4" />
-                    {hasPassed ? "Review Quiz" : quizAttempts.length > 0 ? "Retake Quiz" : "Start Quiz"}
+                    {hasPassed ? "Checkpoint Passed" : quizAttempts.length > 0 ? "Retake Checkpoint" : "Start Checkpoint"}
                   </Link>
                   {hasPassed && nextSection && (
                     <Link
@@ -292,7 +322,7 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
                       href="/training"
                       className="inline-flex items-center gap-2 bg-ditch-green text-white px-6 py-2.5 rounded-lg font-medium hover:bg-ditch-green/90 transition-colors"
                     >
-                      <CheckCircle2 className="w-4 h-4" /> Training Complete
+                      <CheckCircle2 className="w-4 h-4" /> Continue to Finals
                     </Link>
                   )}
                 </div>
@@ -306,10 +336,10 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
                   <div>
                     <h3 className="font-semibold text-gray-500">{sectionQuiz.title}</h3>
                     <p className="text-sm text-gray-400 mt-1">
-                      Complete all {section.modules.length} modules in this section to unlock the quiz.
+                      Review and pass the knowledge check for all {section.modules.length} modules to unlock this checkpoint.
                     </p>
                     <p className="text-xs text-gray-400 mt-2">
-                      {completedCount} of {section.modules.length} modules completed
+                      {masteredCount} mastered · {completedCount} lesson reviews complete
                     </p>
                   </div>
                 </div>

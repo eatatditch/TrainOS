@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { db } from "@/lib/db";
-import { assignPathsForPosition, assignTrainingPathToUser } from "@/lib/assignPaths";
+import { assignTrainingPathToUser, setUserPositions } from "@/lib/assignPaths";
 import { ADMIN_ROLES, MANAGER_ROLES, authorizeApi } from "@/lib/api-auth";
 import { validatePassword } from "@/lib/password-policy";
+import { isPosition, normalizePositions } from "@/lib/positions";
 
 export async function GET(request: NextRequest) {
   const auth = await authorizeApi(MANAGER_ROLES);
@@ -21,7 +22,6 @@ export async function GET(request: NextRequest) {
 
   if (role) query = query.eq("role", role);
   if (location) query = query.eq("location", location);
-  if (position) query = query.eq("position", position);
 
   const { data: users, error: usersError } = await query;
   if (usersError) {
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
   // One current-curriculum snapshot replaces the previous per-user N+1 query.
   // Legacy completions and path links remain in the database for history, but
   // never inflate the active scorecard or surface as assignable path chips.
-  const [assignmentsResult, completionsResult, pathsResult] = await Promise.all([
+  const [assignmentsResult, completionsResult, pathsResult, positionsResult] = await Promise.all([
     db
       .from("ModuleAssignment")
       .select("userId, moduleId, module:Module(isActive, section:Section(isActive))")
@@ -48,8 +48,15 @@ export async function GET(request: NextRequest) {
       .select("userId, trainingPath:TrainingPath(id, title, isActive)")
       .in("userId", userIds)
       .eq("isActive", true),
+    db
+      .from("UserPosition")
+      .select("userId, position, isPrimary")
+      .in("userId", userIds)
+      .eq("isActive", true)
+      .order("isPrimary", { ascending: false })
+      .order("position", { ascending: true }),
   ]);
-  const relatedError = assignmentsResult.error || completionsResult.error || pathsResult.error;
+  const relatedError = assignmentsResult.error || completionsResult.error || pathsResult.error || positionsResult.error;
   if (relatedError) {
     return NextResponse.json({ error: "Unable to load current training progress" }, { status: 500 });
   }
@@ -99,14 +106,29 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const usersWithData = (users || []).map((user) => ({
-    ...user,
-    _count: {
-      assignments: assignmentCounts.get(user.id) || 0,
-      completions: completionCounts.get(user.id) || 0,
-    },
-    trainingPaths: pathsByUser.get(user.id) || [],
-  }));
+  const positionsByUser = new Map<string, string[]>();
+  for (const row of positionsResult.data || []) {
+    const positions = positionsByUser.get(row.userId) || [];
+    if (!positions.includes(row.position)) positions.push(row.position);
+    positionsByUser.set(row.userId, positions);
+  }
+
+  const usersWithData = (users || [])
+    .map((user) => {
+      const positions = positionsByUser.get(user.id) ||
+        (isPosition(user.position) ? [user.position] : []);
+      return {
+        ...user,
+        position: positions[0] || null,
+        positions,
+        _count: {
+          assignments: assignmentCounts.get(user.id) || 0,
+          completions: completionCounts.get(user.id) || 0,
+        },
+        trainingPaths: pathsByUser.get(user.id) || [],
+      };
+    })
+    .filter((user) => !position || user.positions.includes(position));
 
   return NextResponse.json(usersWithData);
 }
@@ -146,6 +168,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
+
+  const rawPositions = data.positions !== undefined
+    ? data.positions
+    : data.position
+      ? [data.position]
+      : [];
+  if (!Array.isArray(rawPositions) || rawPositions.some((value) => !isPosition(value))) {
+    return NextResponse.json(
+      { error: "One or more positions is invalid" },
+      { status: 400 },
+    );
+  }
+  const requestedPositions = normalizePositions(rawPositions);
+
   const { data: existing } = await db
     .from("User")
     .select("*")
@@ -175,7 +211,7 @@ export async function POST(request: NextRequest) {
       firstName: data.firstName.trim(),
       lastName: data.lastName.trim(),
       role: requestedRole,
-      position: data.position || null,
+      position: requestedPositions[0] || null,
       location: data.location || "",
       phone: data.phone || "",
       hireDate: data.hireDate ? new Date(data.hireDate).toISOString() : new Date().toISOString(),
@@ -209,13 +245,19 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Fan out all-team and position-driven paths from the controlled registry.
-    await assignPathsForPosition(newUser.id, newUser.position, newUser.hireDate, adminUser.id);
+    // Persist the full job set and fan out all-team plus every matching path.
+    await setUserPositions(newUser.id, requestedPositions, adminUser.id);
   } catch (assignmentError) {
     await db.from("User").delete().eq("id", newUser.id);
     await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
     return NextResponse.json({ error: assignmentError instanceof Error ? assignmentError.message : "Training assignment failed" }, { status: 500 });
   }
 
-  return NextResponse.json({ id: newUser.id, email: newUser.email, firstName: newUser.firstName, lastName: newUser.lastName });
+  return NextResponse.json({
+    id: newUser.id,
+    email: newUser.email,
+    firstName: newUser.firstName,
+    lastName: newUser.lastName,
+    positions: requestedPositions,
+  });
 }

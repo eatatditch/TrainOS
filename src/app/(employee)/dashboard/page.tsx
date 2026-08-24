@@ -49,7 +49,17 @@ export default async function DashboardPage() {
 
   const assignments = (assignmentsResult.data || []).filter((assignment: any) => assignment.module?.isActive && assignment.module?.section?.isActive);
   const completions = completionsResult.data || [];
-  const quizAttempts = (quizAttemptsResult.data || []).filter((attempt: any) => attempt.quiz?.module?.isActive && attempt.quiz?.module?.section?.isActive).slice(0, 5);
+  const quizAttempts = (quizAttemptsResult.data || []).filter((attempt: any) => {
+    const quiz = attempt.quiz;
+    if (!quiz?.isActive || attempt.assessmentVersion !== quiz.assessmentVersion) return false;
+    if (quiz.quizType === "MODULE") {
+      return quiz.module?.isActive && quiz.module?.section?.isActive;
+    }
+    if (quiz.quizType === "POSITION_FINAL") {
+      return quiz.position && user.positions.includes(quiz.position);
+    }
+    return quiz.quizType === "SECTION";
+  }).slice(0, 5);
   const announcements = announcementsResult.data || [];
 
   const completedIds = new Set(completions.map((c: any) => c.moduleId));
@@ -261,14 +271,14 @@ export default async function DashboardPage() {
           <div className="flex items-center justify-between mb-4">
             <CardTitle className="flex items-center gap-2">
               <ClipboardCheck className="w-5 h-5 text-ditch-green" />
-              Recent Quizzes
+              Recent Assessments
             </CardTitle>
             <Link href="/quizzes" className="text-sm text-ditch-orange hover:underline">View all</Link>
           </div>
           <CardContent>
             <div className="space-y-3">
               {quizAttempts.length === 0 ? (
-                <p className="text-sm text-gray-500 py-4 text-center">No quizzes taken yet.</p>
+                <p className="text-sm text-gray-500 py-4 text-center">No assessments taken yet.</p>
               ) : (
                 quizAttempts.map((attempt: any) => (
                   <div key={attempt.id} className="flex items-center justify-between rounded-xl bg-ditch-navy/[0.035] p-3">

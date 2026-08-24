@@ -24,7 +24,7 @@ export default async function AdminDashboardPage() {
     db.from("Section").select("*", { count: "exact", head: true }).eq("isActive", true),
     db.from("ModuleAssignment").select("id, userId, moduleId, dueDate").eq("isActive", true),
     db.from("ModuleCompletion").select("userId, moduleId"),
-    db.from("QuizAttempt").select("userId, score, passed, quiz:Quiz(moduleId)"),
+    db.from("QuizAttempt").select("userId, score, passed, assessmentVersion, quiz:Quiz(moduleId, quizType, isActive, assessmentVersion)"),
     db.from("Announcement").select("*").eq("isActive", true).order("createdAt", { ascending: false }).limit(5),
   ]);
 
@@ -41,7 +41,16 @@ export default async function AdminDashboardPage() {
   const completionKeys = new Set((totalCompletionsResult.data || []).map((completion: any) => `${completion.userId}:${completion.moduleId}`).filter((key: string) => assignmentKeys.has(key)));
   const totalAssignments = assignmentKeys.size;
   const totalCompletions = completionKeys.size;
-  const quizAttempts = (quizAttemptsResult.data || []).filter((attempt: any) => activeUserIds.has(attempt.userId) && attempt.quiz?.moduleId && activeModuleIds.has(attempt.quiz.moduleId));
+  const quizAttempts = (quizAttemptsResult.data || []).filter((attempt: any) => {
+    if (
+      !activeUserIds.has(attempt.userId) ||
+      !attempt.quiz?.isActive ||
+      attempt.assessmentVersion !== attempt.quiz.assessmentVersion
+    ) {
+      return false;
+    }
+    return attempt.quiz.quizType !== "MODULE" || activeModuleIds.has(attempt.quiz.moduleId);
+  });
   const overdueAssignments = assignments.filter((assignment: any) => assignment.dueDate && new Date(assignment.dueDate) < new Date() && !completionKeys.has(`${assignment.userId}:${assignment.moduleId}`)).length;
   const recentAnnouncements = recentAnnouncementsResult.data || [];
 
@@ -103,7 +112,7 @@ export default async function AdminDashboardPage() {
         <StatCard title="Knowledge avg" value={`${avgScore}%`} icon={ClipboardCheck} />
         <StatCard title="Pass rate" value={`${passRate}%`} icon={TrendingUp} />
         <StatCard title="Assignments" value={totalAssignments} icon={FileText} />
-        <StatCard title="Check attempts" value={quizAttempts.length} icon={ClipboardCheck} />
+        <StatCard title="Assessment attempts" value={quizAttempts.length} icon={ClipboardCheck} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

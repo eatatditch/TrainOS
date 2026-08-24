@@ -99,6 +99,67 @@ export type ModuleAssessment = {
   criticalMisses?: readonly string[];
 };
 
+export type AssessmentQuizType = "MODULE" | "SECTION" | "POSITION_FINAL";
+
+/**
+ * An objective, database-ready question in the versioned assessment bank.
+ *
+ * `sourceModuleId` is required even when a question is reused in a section
+ * checkpoint or position final. That makes coverage auditable and prevents a
+ * broad final from silently omitting one of the modules it claims to assess.
+ */
+export type AssessmentBankQuestion = {
+  id: string;
+  sourceModuleId: string;
+  questionText: string;
+  questionType: "MULTIPLE_CHOICE" | "TRUE_FALSE";
+  options: readonly string[] | null;
+  correctAnswer: string;
+  explanation: string;
+  /** Original curriculum key when this is an authored knowledge question. */
+  authoredKey?: string;
+};
+
+export type ModuleAssessmentBank = {
+  quizType: "MODULE";
+  assessmentVersion: number;
+  quizId: string;
+  moduleId: string;
+  title: string;
+  description: string;
+  passingScore: number;
+  retryLimit: number;
+  questions: readonly AssessmentBankQuestion[];
+};
+
+export type SectionAssessmentBank = {
+  quizType: "SECTION";
+  assessmentVersion: number;
+  quizId: string;
+  programId: string;
+  programSlug: string;
+  sectionId: string;
+  title: string;
+  description: string;
+  passingScore: number;
+  retryLimit: number;
+  coveredModuleIds: readonly string[];
+  questions: readonly AssessmentBankQuestion[];
+};
+
+export type PositionFinalAssessmentBank = {
+  quizType: "POSITION_FINAL";
+  assessmentVersion: number;
+  quizId: string;
+  position: Position;
+  title: string;
+  description: string;
+  passingScore: number;
+  retryLimit: number;
+  coveredModuleIds: readonly string[];
+  questions: readonly AssessmentBankQuestion[];
+};
+
 export type CurriculumModule = {
   id: string;
   slug: string;

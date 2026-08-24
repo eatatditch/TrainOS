@@ -7,7 +7,9 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "curriculum:generate": "node scripts/generate-curriculum-seed.mjs",
+    "curriculum:check": "node scripts/generate-curriculum-seed.mjs --check"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.89.0",
