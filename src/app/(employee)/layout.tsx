@@ -6,13 +6,14 @@ import { PWARegister } from "@/components/pwa-register";
 export default async function EmployeeLayout({ children }: { children: React.ReactNode }) {
   const user = await getUser();
   if (!user) redirect("/login");
+  if (user.mustResetPassword) redirect("/reset-password");
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="app-canvas min-h-screen">
       <PWARegister />
       <EmployeeSidebar user={user} />
-      <main className="lg:pl-64">
-        <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+      <main className="pt-16 lg:pl-72 lg:pt-0">
+        <div className="mx-auto max-w-[1480px] px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-10 xl:px-12">
           {children}
         </div>
       </main>

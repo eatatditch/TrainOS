@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { slugify } from "@/lib/utils";
+import { ADMIN_ROLES, MANAGER_ROLES, authorizeApi } from "@/lib/api-auth";
+import { removeTrainingAssetObjects } from "@/lib/training-assets";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await authorizeApi(MANAGER_ROLES);
+  if (!auth.authorized) return auth.response;
+
   const { id } = await params;
 
   const { data: mod } = await db
@@ -17,18 +21,37 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = await getUser();
-  if (!user || !["SUPER_ADMIN", "ADMIN"].includes(user.role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-  }
+  const auth = await authorizeApi(ADMIN_ROLES);
+  if (!auth.authorized) return auth.response;
 
   const { id } = await params;
   const data = await request.json();
 
   // Handle asset deletion
   if (data.deleteAssetId) {
-    await db.from("ModuleAsset").delete().eq("id", data.deleteAssetId).eq("moduleId", id);
-    return NextResponse.json({ success: true, deleted: data.deleteAssetId });
+    const { data: asset } = await db
+      .from("ModuleAsset")
+      .select("id, fileUrl, storagePath")
+      .eq("id", data.deleteAssetId)
+      .eq("moduleId", id)
+      .single();
+    if (!asset) {
+      return NextResponse.json({ error: "Asset not found" }, { status: 404 });
+    }
+    const { error: deleteError } = await db
+      .from("ModuleAsset")
+      .delete()
+      .eq("id", data.deleteAssetId)
+      .eq("moduleId", id);
+    if (deleteError) {
+      return NextResponse.json({ error: deleteError.message }, { status: 500 });
+    }
+    const storageResult = await removeTrainingAssetObjects([asset]);
+    return NextResponse.json({
+      success: true,
+      deleted: data.deleteAssetId,
+      storageCleanupPending: Boolean(storageResult.error),
+    });
   }
 
   const updateData: any = {};
@@ -55,12 +78,16 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = await getUser();
-  if (!user || !["SUPER_ADMIN", "ADMIN"].includes(user.role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-  }
+  const auth = await authorizeApi(ADMIN_ROLES);
+  if (!auth.authorized) return auth.response;
 
   const { id } = await params;
-  await db.from("Module").delete().eq("id", id);
-  return NextResponse.json({ success: true });
+  const { error } = await db.rpc("archive_training_module_atomic", {
+    p_module_id: id,
+  });
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({
+    success: true,
+    archived: true,
+  });
 }

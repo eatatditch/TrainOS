@@ -43,11 +43,12 @@ export default function MenuAdminPage() {
   });
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+    <div className="space-y-8 animate-fade-in">
+      <div className="shell-card flex flex-col gap-5 p-6 xl:flex-row xl:items-end xl:justify-between xl:p-7">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Menu & Kitchen</h1>
-          <p className="text-gray-500 mt-1">Edit menu items, ingredients, and kitchen config. Changes are live instantly in SpecOS.</p>
+          <p className="page-kicker">One source of truth</p>
+          <h1 className="page-title">Menu intelligence</h1>
+          <p className="page-subtitle">Control menu items, ingredients, definitions, and kitchen details used by SpecOS.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Link href="/admin/menu/kitchen">

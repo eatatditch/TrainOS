@@ -1,22 +1,22 @@
 {
-  "name": "Ditch Training",
-  "short_name": "Training",
-  "description": "Internal training and knowledge center for Ditch team members",
-  "start_url": "/",
+  "name": "TrainOS by Ditch",
+  "short_name": "TrainOS",
+  "description": "Ditch hospitality training, certifications, and team operating standards",
+  "start_url": "/dashboard",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f9fafb",
-  "theme_color": "#cd6028",
+  "background_color": "#f7f1e8",
+  "theme_color": "#102a43",
   "orientation": "portrait",
   "icons": [
     {
-      "src": "/api/icon",
+      "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/api/icon",
+      "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

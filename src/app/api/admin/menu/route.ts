@@ -1,12 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getUser } from "@/lib/auth";
-
-async function assertAdmin() {
-  const user = await getUser();
-  if (!user || !["SUPER_ADMIN", "ADMIN", "MANAGER"].includes(user.role)) return false;
-  return true;
-}
+import { MANAGER_ROLES, authorizeApi } from "@/lib/api-auth";
 
 // Serialize structured fields into the SearchIndex content format
 function serializeContent(item: any): string {
@@ -16,8 +10,8 @@ function serializeContent(item: any): string {
   if (item.badge) lines.push(`Badge: ${item.badge}`);
   if (item.description) lines.push(`Description: ${item.description}`);
   if (item.ingredients) lines.push(`Ingredients: ${item.ingredients}`);
-  lines.push(`Contains: ${item.allergens?.length ? item.allergens.join(", ") : "none"}`);
-  lines.push(`Dietary: ${item.dietary?.length ? item.dietary.join(", ") : "none"}`);
+  lines.push(`Contains: ${item.allergens?.length ? item.allergens.join(", ") : "unverified"}`);
+  lines.push(`Dietary: ${item.dietary?.length ? item.dietary.join(", ") : "unverified"}`);
   if (item.modifications) lines.push(`Modifications: ${item.modifications}`);
   return lines.join("\n");
 }
@@ -45,7 +39,7 @@ function parseContent(content: string) {
   };
   const list = (label: string) => {
     const v = field(label);
-    if (!v || v === "none") return [];
+    if (!v || v === "none" || v === "unverified") return [];
     return v.split(/,\s*/).map((s) => s.trim().toLowerCase()).filter(Boolean);
   };
   return {
@@ -60,12 +54,59 @@ function parseContent(content: string) {
   };
 }
 
+async function syncIngredientLinks(foodItemId: string, input: unknown) {
+  if (!Array.isArray(input)) return null;
+  const ingredientIds: string[] = Array.from(
+    new Set(input.filter((value): value is string => typeof value === "string" && value.length > 0)),
+  );
+
+  if (ingredientIds.length > 0) {
+    const { data: ingredients, error } = await db
+      .from("Ingredient")
+      .select("id")
+      .in("id", ingredientIds);
+    if (error) return error.message;
+    if ((ingredients || []).length !== ingredientIds.length) {
+      return "One or more selected ingredients no longer exist";
+    }
+  }
+
+  const { data: existing, error: existingError } = await db
+    .from("FoodItemIngredient")
+    .select("ingredientId")
+    .eq("foodItemId", foodItemId);
+  if (existingError) return existingError.message;
+
+  const existingIds = new Set<string>((existing || []).map((link: any) => link.ingredientId));
+  const additions = ingredientIds.filter((ingredientId) => !existingIds.has(ingredientId));
+  if (additions.length > 0) {
+    const { error } = await db.from("FoodItemIngredient").insert(
+      additions.map((ingredientId) => ({ foodItemId, ingredientId })),
+    );
+    if (error) return error.message;
+  }
+
+  const desiredIds = new Set(ingredientIds);
+  const removals = Array.from(existingIds).filter((ingredientId) => !desiredIds.has(ingredientId));
+  if (removals.length > 0) {
+    const { error } = await db
+      .from("FoodItemIngredient")
+      .delete()
+      .eq("foodItemId", foodItemId)
+      .in("ingredientId", removals);
+    if (error) return error.message;
+  }
+
+  return null;
+}
+
 export async function GET(request: NextRequest) {
-  if (!(await assertAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await authorizeApi(MANAGER_ROLES);
+  if (!auth.authorized) return auth.response;
   const id = request.nextUrl.searchParams.get("id");
 
   if (id) {
-    const { data } = await db.from("SearchIndex").select("*").eq("id", id).single();
+    const { data } = await db.from("SearchIndex").select("*").eq("id", id).eq("contentType", "food").single();
     if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const { data: links } = await db
@@ -99,7 +140,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  if (!(await assertAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await authorizeApi(MANAGER_ROLES);
+  if (!auth.authorized) return auth.response;
   const body = await request.json();
   const { id, title, tags, ingredientIds, ...fields } = body;
   if (!id || !title) return NextResponse.json({ error: "id and title required" }, { status: 400 });
@@ -110,26 +152,22 @@ export async function PUT(request: NextRequest) {
   const { error } = await db
     .from("SearchIndex")
     .update({ title, tags: finalTags, content })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("contentType", "food");
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   if (Array.isArray(ingredientIds)) {
-    await db.from("FoodItemIngredient").delete().eq("foodItemId", id);
-    if (ingredientIds.length > 0) {
-      const rows = ingredientIds.map((ingredientId: string) => ({
-        foodItemId: id,
-        ingredientId,
-      }));
-      await db.from("FoodItemIngredient").insert(rows);
-    }
+    const linkError = await syncIngredientLinks(id, ingredientIds);
+    if (linkError) return NextResponse.json({ error: linkError }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });
 }
 
 export async function POST(request: NextRequest) {
-  if (!(await assertAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await authorizeApi(MANAGER_ROLES);
+  if (!auth.authorized) return auth.response;
   const body = await request.json();
   const { id, title, tags, ingredientIds, ...fields } = body;
   if (!id || !title) return NextResponse.json({ error: "id and title required" }, { status: 400 });
@@ -139,7 +177,7 @@ export async function POST(request: NextRequest) {
 
   const { error } = await db.from("SearchIndex").insert({
     id,
-    moduleId: "mod-menu-food",
+    moduleId: "cur-server-food-menu",
     contentType: "food",
     title,
     content,
@@ -149,21 +187,34 @@ export async function POST(request: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   if (Array.isArray(ingredientIds) && ingredientIds.length > 0) {
-    const rows = ingredientIds.map((ingredientId: string) => ({
-      foodItemId: id,
-      ingredientId,
-    }));
-    await db.from("FoodItemIngredient").insert(rows);
+    const linkError = await syncIngredientLinks(id, ingredientIds);
+    if (linkError) {
+      await db.from("SearchIndex").delete().eq("id", id);
+      return NextResponse.json({ error: linkError }, { status: 500 });
+    }
   }
 
   return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(request: NextRequest) {
-  if (!(await assertAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await authorizeApi(MANAGER_ROLES);
+  if (!auth.authorized) return auth.response;
   const id = request.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
-  await db.from("FoodItemIngredient").delete().eq("foodItemId", id);
-  await db.from("SearchIndex").delete().eq("id", id);
+  const { data: item, error: findError } = await db
+    .from("SearchIndex")
+    .select("tags")
+    .eq("id", id)
+    .eq("contentType", "food")
+    .single();
+  if (findError || !item) return NextResponse.json({ error: "Menu item not found" }, { status: 404 });
+
+  const archivedTags = Array.from(new Set([...(item.tags || []), "archived"]));
+  const { error } = await db
+    .from("SearchIndex")
+    .update({ contentType: "archived-food", tags: archivedTags })
+    .eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

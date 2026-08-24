@@ -1,26 +1,13 @@
-const CACHE_NAME = "specos-v1";
-const OFFLINE_URL = "/specos";
-
-self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll([OFFLINE_URL]))
-  );
-  self.skipWaiting();
-});
+// SpecOS answers can contain current internal recipes and operational data.
+// Keep its service worker installable, but never persist authenticated HTML or
+// API responses on shared restaurant devices.
+self.addEventListener("install", () => self.skipWaiting());
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+      Promise.all(keys.filter((key) => key.startsWith("specos-")).map((key) => caches.delete(key))),
+    ),
   );
   self.clients.claim();
-});
-
-self.addEventListener("fetch", (event) => {
-  if (event.request.mode === "navigate") {
-    event.respondWith(
-      fetch(event.request).catch(() => caches.match(OFFLINE_URL))
-    );
-  }
 });

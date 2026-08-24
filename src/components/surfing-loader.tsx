@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 
 const TIPS = [
   "Surfing for the best answer...",
@@ -33,12 +34,12 @@ export function SurfingLoader({ dark = false, message }: SurfingLoaderProps) {
 
   const cardCls = dark
     ? "bg-white/5 border-white/10"
-    : "bg-gradient-to-br from-sky-50 via-white to-orange-50 border-ditch-orange/20";
-  const textCls = dark ? "text-white" : "text-gray-800";
-  const subCls = dark ? "text-white/60" : "text-gray-500";
+    : "bg-gradient-to-br from-ditch-sky/45 via-white to-ditch-sand/35 border-ditch-navy/10";
+  const textCls = dark ? "text-white" : "text-ditch-ink";
+  const subCls = dark ? "text-white/60" : "text-ditch-navy/45";
 
   return (
-    <div className={`rounded-2xl border ${cardCls} p-6 overflow-hidden`}>
+    <div className={`overflow-hidden rounded-[1.75rem] border ${cardCls} p-6 shadow-[var(--shadow-surf)]`} role="status" aria-live="polite">
       <div className="relative h-28 sm:h-32 w-full">
         {/* Sky / sun */}
         <div className="absolute inset-0 flex items-start justify-end pr-6 pt-2">
@@ -54,7 +55,7 @@ export function SurfingLoader({ dark = false, message }: SurfingLoaderProps) {
         >
           <path
             d="M0 50 Q 50 30 100 50 T 200 50 T 300 50 T 400 50 V80 H0 Z"
-            fill={dark ? "#325269" : "#325269"}
+            fill={dark ? "#143b4b" : "#143b4b"}
             opacity="0.85"
           >
             <animate
@@ -70,7 +71,7 @@ export function SurfingLoader({ dark = false, message }: SurfingLoaderProps) {
           </path>
           <path
             d="M0 60 Q 60 45 120 60 T 240 60 T 360 60 T 400 60 V80 H0 Z"
-            fill={dark ? "#1e3a52" : "#5ba7d4"}
+            fill={dark ? "#0f2c38" : "#75b6bf"}
             opacity="0.7"
           >
             <animate
@@ -102,11 +103,12 @@ export function SurfingLoader({ dark = false, message }: SurfingLoaderProps) {
               <circle cx="48" cy="10" r="1.5" fill="#a44a1e" />
             </svg>
             {/* Paloma Man riding the board */}
-            <img
-              src="/api/mascot/paloma?v=2"
+            <Image
+              src="/paloma-man.svg"
               alt=""
               width={72}
               height={72}
+              unoptimized
               className="relative block drop-shadow-lg"
               style={{ width: 72, height: 72, objectFit: "contain" }}
             />

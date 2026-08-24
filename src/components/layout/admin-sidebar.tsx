@@ -3,24 +3,25 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { cn } from "@/lib/utils";
+import { cn, getInitials } from "@/lib/utils";
+import { DitchMark } from "@/components/brand/ditch-mark";
 import {
-  LayoutDashboard,
-  FileText,
-  ClipboardCheck,
-  Users,
-  Route,
-  BarChart3,
-  Megaphone,
-  Image,
   ArrowLeft,
+  Award,
+  BarChart3,
+  ClipboardCheck,
+  FileText,
+  Image,
+  LayoutDashboard,
   LogOut,
+  Megaphone,
   Menu,
-  X,
+  Route,
   Utensils,
+  Users,
+  X,
 } from "lucide-react";
-import { useState } from "react";
-import { getInitials } from "@/lib/utils";
+import { useEffect, useRef, useState } from "react";
 
 interface SidebarProps {
   user: {
@@ -31,114 +32,157 @@ interface SidebarProps {
 }
 
 const navItems = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { href: "/admin/content", label: "Content Manager", icon: FileText },
-  { href: "/admin/quizzes", label: "Quiz Builder", icon: ClipboardCheck },
-  { href: "/admin/menu", label: "Menu & Kitchen", icon: Utensils },
-  { href: "/admin/employees", label: "Employees", icon: Users },
-  { href: "/admin/paths", label: "Training Paths", icon: Route },
+  { href: "/admin", label: "Control Room", icon: LayoutDashboard, exact: true },
+  { href: "/admin/content", label: "Playbook", icon: FileText, adminOnly: true },
+  { href: "/admin/quizzes", label: "Knowledge Checks", icon: ClipboardCheck, adminOnly: true },
+  { href: "/admin/menu", label: "Menu Intel", icon: Utensils },
+  { href: "/admin/certifications", label: "Certifications", icon: Award },
+  { href: "/admin/employees", label: "Crew", icon: Users, adminOnly: true },
+  { href: "/admin/paths", label: "Learning Paths", icon: Route, adminOnly: true },
   { href: "/admin/reports", label: "Reports", icon: BarChart3 },
-  { href: "/admin/announcements", label: "Announcements", icon: Megaphone },
-  { href: "/admin/media", label: "Media Library", icon: Image },
+  { href: "/admin/announcements", label: "Team Updates", icon: Megaphone, adminOnly: true },
+  { href: "/admin/media", label: "Asset Library", icon: Image, adminOnly: true },
 ];
 
 export function AdminSidebar({ user }: SidebarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const asideRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1024px)");
+    const sync = () => setIsDesktop(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    requestAnimationFrame(() => asideRef.current?.querySelector<HTMLElement>("a")?.focus());
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      menuButtonRef.current?.focus();
+    };
+  }, [mobileOpen]);
+
+  const signOut = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    window.location.assign("/login");
+  };
 
   return (
     <>
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-30 bg-ditch-navy px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-ditch-orange rounded-lg flex items-center justify-center">
-            <span className="text-white text-sm font-bold">D</span>
-          </div>
-          <span className="font-semibold text-white">Admin Panel</span>
-        </div>
-        <button onClick={() => setMobileOpen(!mobileOpen)} className="p-2 text-white">
-          {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+      <header className="fixed inset-x-0 top-0 z-30 flex h-16 items-center justify-between border-b border-ditch-navy/10 bg-ditch-cream/95 px-4 backdrop-blur-xl lg:hidden">
+        <DitchMark compact product="Control" />
+        <p className="absolute left-1/2 -translate-x-1/2 text-xs font-black uppercase tracking-[0.18em] text-ditch-ink">
+          Control
+        </p>
+        <button
+          ref={menuButtonRef}
+          type="button"
+          onClick={() => setMobileOpen((open) => !open)}
+          className="grid size-10 place-items-center rounded-xl border border-ditch-navy/10 bg-white text-ditch-ink"
+          aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
+          aria-expanded={mobileOpen}
+        >
+          {mobileOpen ? <X className="size-5" /> : <Menu className="size-5" />}
         </button>
-      </div>
+      </header>
 
       {mobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-30 bg-black/50" onClick={() => setMobileOpen(false)} />
+        <button
+          type="button"
+          aria-label="Close navigation"
+          className="fixed inset-0 z-30 bg-ditch-ink/55 backdrop-blur-sm lg:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
       )}
 
-      <aside className={cn(
-        "fixed top-0 left-0 z-40 h-full w-64 bg-ditch-navy flex flex-col transition-transform duration-200",
-        mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
-      )}>
-        <div className="p-6 border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-ditch-orange rounded-xl flex items-center justify-center">
-              <span className="text-white text-lg font-bold">D</span>
-            </div>
-            <div>
-              <h2 className="font-bold text-white">Ditch Training</h2>
-              <p className="text-xs text-white/50">Admin Panel</p>
-            </div>
-          </div>
+      <aside
+        ref={asideRef}
+        aria-hidden={!isDesktop && !mobileOpen ? true : undefined}
+        inert={!isDesktop && !mobileOpen ? true : undefined}
+        className={cn(
+          "fixed inset-y-0 left-0 z-40 flex w-72 flex-col overflow-hidden bg-ditch-ink text-white shadow-2xl transition-transform duration-300 lg:translate-x-0 lg:shadow-none",
+          mobileOpen ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
+        <div className="pointer-events-none absolute -right-20 -top-24 size-64 rounded-full border-[64px] border-ditch-orange/[0.055]" />
+        <div className="relative border-b border-white/10 px-6 py-7">
+          <DitchMark inverse product="Control" />
         </div>
 
-        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          {navItems.map((item) => {
-            const isActive = item.exact
-              ? pathname === item.href
-              : pathname === item.href || pathname.startsWith(item.href + "/");
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setMobileOpen(false)}
-                className={cn(
-                  "flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-ditch-orange text-white"
-                    : "text-white/70 hover:bg-white/10 hover:text-white"
-                )}
-              >
-                <item.icon className="w-5 h-5" />
-                {item.label}
-              </Link>
-            );
-          })}
+        <nav className="relative flex-1 overflow-y-auto px-4 py-5" aria-label="Admin navigation">
+          <p className="mb-3 px-3 text-[9px] font-extrabold uppercase tracking-[0.24em] text-white/35">
+            Run the standard
+          </p>
+          <div className="space-y-1">
+            {navItems.filter((item) => !item.adminOnly || user.role !== "MANAGER").map((item) => {
+              const isActive = item.exact
+                ? pathname === item.href
+                : pathname === item.href || pathname.startsWith(`${item.href}/`);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setMobileOpen(false)}
+                  aria-current={isActive ? "page" : undefined}
+                  className={cn(
+                    "group flex min-h-11 items-center gap-3 rounded-xl px-3.5 text-sm font-bold transition-all",
+                    isActive
+                      ? "bg-ditch-orange text-white shadow-[0_8px_24px_rgba(216,95,42,0.22)]"
+                      : "text-white/55 hover:bg-white/[0.06] hover:text-white"
+                  )}
+                >
+                  <item.icon className={cn("size-[18px]", isActive ? "text-white" : "text-white/40 group-hover:text-ditch-seafoam")} />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
 
-          <div className="border-t border-white/10 my-3" />
-          <Link
-            href="/dashboard"
-            onClick={() => setMobileOpen(false)}
-            className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5" />
-            Employee View
-          </Link>
+          <div className="mt-5 border-t border-white/10 pt-5">
+            <Link
+              href="/dashboard"
+              onClick={() => setMobileOpen(false)}
+              className="flex min-h-11 items-center gap-3 rounded-xl px-3.5 text-sm font-bold text-white/50 transition-colors hover:bg-white/[0.06] hover:text-white"
+            >
+              <ArrowLeft className="size-[18px]" />
+              Back to TrainOS
+            </Link>
+          </div>
         </nav>
 
-        <div className="p-4 border-t border-white/10">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-9 h-9 bg-ditch-orange/20 rounded-full flex items-center justify-center">
-              <span className="text-ditch-orange text-xs font-semibold">
-                {getInitials(user.firstName, user.lastName)}
-              </span>
+        <div className="relative p-4">
+          <div className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.04] p-3">
+            <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-ditch-orange text-xs font-black text-white">
+              {getInitials(user.firstName, user.lastName)}
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white truncate">
-                {user.firstName} {user.lastName}
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-bold">{user.firstName} {user.lastName}</p>
+              <p className="mt-0.5 truncate text-[10px] font-bold uppercase tracking-wider text-white/35">
+                {user.role.replace("_", " ")}
               </p>
-              <p className="text-xs text-white/50 capitalize">{user.role.replace("_", " ").toLowerCase()}</p>
             </div>
+            <button
+              type="button"
+              onClick={signOut}
+              aria-label="Sign out"
+              className="grid size-9 place-items-center rounded-xl text-white/35 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <LogOut className="size-4" />
+            </button>
           </div>
-          <button
-            onClick={async () => { const supabase = createClient(); await supabase.auth.signOut(); window.location.href = "/login"; }}
-            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-white/50 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-          >
-            <LogOut className="w-4 h-4" />
-            Sign Out
-          </button>
         </div>
       </aside>
-
-      <div className="lg:hidden h-14" />
     </>
   );
 }

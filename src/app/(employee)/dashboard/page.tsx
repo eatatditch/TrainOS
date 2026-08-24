@@ -8,7 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import { formatDate, calculatePercentage, formatDuration } from "@/lib/utils";
 import {
   BookOpen,
-  CheckCircle2,
   Clock,
   AlertTriangle,
   ClipboardCheck,
@@ -17,6 +16,7 @@ import {
   Star,
 } from "lucide-react";
 import { PalomaMan } from "@/components/paloma-man";
+import { getAssignedModuleIds } from "@/lib/training-access";
 
 export default async function DashboardPage() {
   const user = await getUser();
@@ -25,23 +25,12 @@ export default async function DashboardPage() {
   const userId = user.id;
   const firstName = user.firstName;
 
-  // Fetch user's assigned training path modules first
-  const { data: userPaths } = await db
-    .from("UserTrainingPath")
-    .select("trainingPath:TrainingPath(modules:TrainingPathModule(moduleId))")
-    .eq("userId", userId);
-
-  const assignedModuleIds: string[] = [];
-  (userPaths || []).forEach((up: any) => {
-    (up.trainingPath?.modules || []).forEach((tpm: any) => {
-      if (tpm.moduleId) assignedModuleIds.push(tpm.moduleId);
-    });
-  });
+  const assignedModuleIds = Array.from(await getAssignedModuleIds(user.id));
 
   const [assignmentsResult, completionsResult, quizAttemptsResult, announcementsResult] = await Promise.all([
-    db.from("ModuleAssignment").select("*, module:Module(*, section:Section(*))").eq("userId", userId).order("dueDate"),
+    db.from("ModuleAssignment").select("*, module:Module(*, section:Section(*))").eq("userId", userId).eq("isActive", true).order("dueDate"),
     db.from("ModuleCompletion").select("*").eq("userId", userId),
-    db.from("QuizAttempt").select("*, quiz:Quiz(*, module:Module(*))").eq("userId", userId).order("completedAt", { ascending: false }).limit(5),
+    db.from("QuizAttempt").select("*, quiz:Quiz(*, module:Module(*, section:Section(*)))").eq("userId", userId).order("completedAt", { ascending: false }).limit(20),
     db.from("Announcement").select("*").eq("isActive", true).or("expiresAt.is.null,expiresAt.gte." + new Date().toISOString()).order("createdAt", { ascending: false }).limit(5),
   ]);
 
@@ -55,12 +44,12 @@ export default async function DashboardPage() {
       .in("id", assignedModuleIds)
       .order("createdAt", { ascending: false })
       .limit(6);
-    recentModules = data || [];
+    recentModules = (data || []).filter((trainingModule: any) => trainingModule.section?.isActive).slice(0, 6);
   }
 
-  const assignments = assignmentsResult.data || [];
+  const assignments = (assignmentsResult.data || []).filter((assignment: any) => assignment.module?.isActive && assignment.module?.section?.isActive);
   const completions = completionsResult.data || [];
-  const quizAttempts = quizAttemptsResult.data || [];
+  const quizAttempts = (quizAttemptsResult.data || []).filter((attempt: any) => attempt.quiz?.module?.isActive && attempt.quiz?.module?.section?.isActive).slice(0, 5);
   const announcements = announcementsResult.data || [];
 
   const completedIds = new Set(completions.map((c: any) => c.moduleId));
@@ -93,45 +82,52 @@ export default async function DashboardPage() {
       : "Still at it";
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8 animate-fade-in">
       {/* Welcome Header */}
-      <div className="bg-gradient-to-r from-ditch-navy to-ditch-navy/80 rounded-2xl p-6 sm:p-8 text-white">
-        <h1 className="text-2xl sm:text-3xl font-bold">{greeting}, {firstName}! 🤙</h1>
-        <p className="text-white/70 mt-2">Welcome to your Ditch Training Portal</p>
-        <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div className="bg-white/10 rounded-xl p-3 text-center">
-            <p className="text-2xl font-bold">{totalAssigned}</p>
-            <p className="text-xs text-white/70">Assigned</p>
+      <section className="relative overflow-hidden rounded-[2rem] bg-ditch-navy p-6 text-white shadow-[var(--shadow-lift)] sm:p-8 lg:p-10">
+        <div className="pointer-events-none absolute -right-24 -top-32 size-96 rounded-full border-[88px] border-ditch-seafoam/[0.08]" />
+        <div className="pointer-events-none absolute -bottom-28 right-1/4 size-64 rounded-full border-[58px] border-ditch-orange/[0.08]" />
+        <div className="relative z-10 max-w-3xl">
+          <p className="mb-3 text-[10px] font-extrabold uppercase tracking-[0.24em] text-ditch-seafoam">Today at Ditch</p>
+          <h1 className="text-3xl font-black tracking-[-0.045em] sm:text-4xl lg:text-5xl">{greeting}, {firstName}.</h1>
+          <p className="mt-3 max-w-xl text-sm leading-6 text-white/60 sm:text-base">
+            Keep the standard sharp, then bring the good vibes to the floor.
+          </p>
+        </div>
+        <div className="relative z-10 mt-7 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-3.5 sm:p-4">
+            <p className="text-2xl font-black tracking-tight sm:text-3xl">{totalAssigned}</p>
+            <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.16em] text-white/45">Assigned</p>
           </div>
-          <div className="bg-white/10 rounded-xl p-3 text-center">
-            <p className="text-2xl font-bold">{completedAssigned}</p>
-            <p className="text-xs text-white/70">Completed</p>
+          <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-3.5 sm:p-4">
+            <p className="text-2xl font-black tracking-tight sm:text-3xl">{completedAssigned}</p>
+            <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.16em] text-white/45">Complete</p>
           </div>
-          <div className="bg-white/10 rounded-xl p-3 text-center">
-            <p className="text-2xl font-bold">{calculatePercentage(completedAssigned, totalAssigned)}%</p>
-            <p className="text-xs text-white/70">Progress</p>
+          <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-3.5 sm:p-4">
+            <p className="text-2xl font-black tracking-tight text-ditch-seafoam sm:text-3xl">{calculatePercentage(completedAssigned, totalAssigned)}%</p>
+            <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.16em] text-white/45">Progress</p>
           </div>
-          <div className="bg-white/10 rounded-xl p-3 text-center">
-            <p className="text-2xl font-bold text-red-300">{overdue.length}</p>
-            <p className="text-xs text-white/70">Overdue</p>
+          <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-3.5 sm:p-4">
+            <p className={`text-2xl font-black tracking-tight sm:text-3xl ${overdue.length > 0 ? "text-orange-300" : "text-white"}`}>{overdue.length}</p>
+            <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.16em] text-white/45">Overdue</p>
           </div>
         </div>
         {totalAssigned > 0 && (
-          <div className="mt-4">
+          <div className="relative z-10 mt-5 max-w-3xl">
             <ProgressBar value={completedAssigned} max={totalAssigned} showLabel={false} size="md" />
           </div>
         )}
-      </div>
+      </section>
 
       {/* Paloma Man — your guide */}
-      <div className="flex justify-end">
-        <PalomaMan size="md" message={`${greeting}, ${firstName}! Need anything? Tap "Search & Answers" anytime — I've got the menu, allergens, and more.`} />
+      <div className="flex justify-end -mt-3">
+        <PalomaMan size="md" message={`Need a spec or allergen answer? Ask SpecOS before you guess — guessing is not a hospitality strategy.`} />
       </div>
 
       {/* Announcements */}
       {announcements.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+          <h2 className="flex items-center gap-2 text-lg font-extrabold tracking-tight text-ditch-ink">
             <Megaphone className="w-5 h-5 text-ditch-orange" />
             Announcements
           </h2>
@@ -139,18 +135,18 @@ export default async function DashboardPage() {
             {announcements.map((ann: any) => (
               <div
                 key={ann.id}
-                className={`rounded-lg p-4 border-l-4 ${
+                className={`rounded-2xl border p-4 shadow-sm ${
                   ann.priority === "URGENT"
-                    ? "bg-red-50 border-red-500"
+                    ? "bg-red-50 border-red-200"
                     : ann.priority === "HIGH"
-                    ? "bg-orange-50 border-ditch-orange"
-                    : "bg-blue-50 border-ditch-navy"
+                    ? "bg-orange-50 border-orange-200"
+                    : "bg-white/90 border-ditch-navy/10"
                 }`}
               >
                 <div className="flex items-start justify-between">
                   <div>
-                    <h3 className="font-medium text-gray-900">{ann.title}</h3>
-                    <p className="text-sm text-gray-600 mt-1">{ann.content}</p>
+                    <h3 className="font-bold text-ditch-ink">{ann.title}</h3>
+                    <p className="mt-1 text-sm leading-6 text-ditch-navy/65">{ann.content}</p>
                   </div>
                   <span className="text-xs text-gray-400 whitespace-nowrap ml-4">
                     {formatDate(ann.createdAt)}
@@ -162,7 +158,7 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {/* Required Training */}
         {required.length > 0 && (
           <Card>
@@ -179,7 +175,7 @@ export default async function DashboardPage() {
                   <Link
                     key={a.id}
                     href={`/training/${a.module.section?.slug}/${a.module.slug}`}
-                    className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition-colors group"
+                    className="group flex items-center justify-between rounded-xl border border-transparent p-3 transition-colors hover:border-ditch-navy/10 hover:bg-ditch-sand/20"
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{a.module.title}</p>
@@ -209,7 +205,7 @@ export default async function DashboardPage() {
                   <Link
                     key={a.id}
                     href={`/training/${a.module.section?.slug}/${a.module.slug}`}
-                    className="flex items-center justify-between p-3 rounded-lg hover:bg-red-50 transition-colors group"
+                    className="group flex items-center justify-between rounded-xl p-3 transition-colors hover:bg-red-50"
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{a.module.title}</p>
@@ -244,7 +240,7 @@ export default async function DashboardPage() {
                   <Link
                     key={a.id}
                     href={`/training/${a.module.section?.slug}/${a.module.slug}`}
-                    className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition-colors group"
+                    className="group flex items-center justify-between rounded-xl p-3 transition-colors hover:bg-ditch-sand/20"
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{a.module.title}</p>
@@ -275,7 +271,7 @@ export default async function DashboardPage() {
                 <p className="text-sm text-gray-500 py-4 text-center">No quizzes taken yet.</p>
               ) : (
                 quizAttempts.map((attempt: any) => (
-                  <div key={attempt.id} className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+                  <div key={attempt.id} className="flex items-center justify-between rounded-xl bg-ditch-navy/[0.035] p-3">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{attempt.quiz.title}</p>
                       <p className="text-xs text-gray-500">
@@ -299,7 +295,10 @@ export default async function DashboardPage() {
       {/* Recent Training Content */}
       <div>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">Recent Training Content</h2>
+          <div>
+            <p className="page-kicker">Keep building</p>
+            <h2 className="text-xl font-extrabold tracking-tight text-ditch-ink">Your next reps</h2>
+          </div>
           <Link href="/training" className="text-sm text-ditch-orange hover:underline flex items-center gap-1">
             Browse Library <ArrowRight className="w-4 h-4" />
           </Link>

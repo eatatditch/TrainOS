@@ -2,12 +2,19 @@ import { db } from "@/lib/db";
 import { getUser } from "@/lib/auth";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { formatDuration } from "@/lib/utils";
-import { ArrowLeft, ArrowRight, Clock, FileText, Download, Video, Image as ImageIcon, CheckCircle2, Printer } from "lucide-react";
+import { formatDuration, formatDate } from "@/lib/utils";
+import { ArrowLeft, ArrowRight, Award, Clock, FileText, Download, Video, Image as ImageIcon, CheckCircle2, Printer } from "lucide-react";
 import { MarkCompleteButton } from "@/components/training/mark-complete-button";
 import { ModuleContent } from "@/components/training/module-content";
+import {
+  canAccessModule,
+  canManageTraining,
+  getAssignedModuleIds,
+} from "@/lib/training-access";
+import { createReviewToken } from "@/lib/review-token";
 
 export default async function ModuleDetailPage({
   params,
@@ -16,7 +23,8 @@ export default async function ModuleDetailPage({
 }) {
   const { sectionSlug, moduleSlug } = await params;
   const user = await getUser();
-  const userId = user?.id;
+  if (!user) redirect("/login");
+  const userId = user.id;
 
   // Fetch the section first to get its ID for filtering
   const { data: sectionData } = await db
@@ -37,28 +45,11 @@ export default async function ModuleDetailPage({
 
   if (!moduleData) notFound();
 
-  const isAdmin = user ? ["SUPER_ADMIN", "ADMIN", "MANAGER"].includes(user.role) : false;
-
-  // Check if employee is assigned to this module via a training path
-  if (userId && !isAdmin) {
-    const { data: userPaths } = await db
-      .from("UserTrainingPath")
-      .select("trainingPath:TrainingPath(modules:TrainingPathModule(moduleId))")
-      .eq("userId", userId);
-
-    const assignedModuleIds = new Set<string>();
-    (userPaths || []).forEach((up: any) => {
-      (up.trainingPath?.modules || []).forEach((tpm: any) => {
-        if (tpm.moduleId) assignedModuleIds.add(tpm.moduleId);
-      });
-    });
-
-    if (!assignedModuleIds.has(moduleData.id)) {
-      redirect("/training");
-    }
+  if (!(await canAccessModule(user, moduleData.id))) {
+    redirect("/training");
   }
 
-  const module = {
+  const trainingModule = {
     ...moduleData,
     assets: (moduleData.assets || []).sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
   };
@@ -71,15 +62,23 @@ export default async function ModuleDetailPage({
     .eq("isActive", true)
     .order("sortOrder");
 
-  const sortedModules = (allSectionModules || []).sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
-  const currentIndex = sortedModules.findIndex((m: any) => m.id === module.id);
+  let sortedModules = (allSectionModules || []).sort(
+    (a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0),
+  );
+  if (!canManageTraining(user)) {
+    const assignedModuleIds = await getAssignedModuleIds(user.id);
+    sortedModules = sortedModules.filter((item: any) =>
+      assignedModuleIds.has(item.id),
+    );
+  }
+  const currentIndex = sortedModules.findIndex((m: any) => m.id === trainingModule.id);
   const nextModule = currentIndex >= 0 && currentIndex < sortedModules.length - 1
     ? sortedModules[currentIndex + 1]
     : null;
   const isLastModule = currentIndex === sortedModules.length - 1;
 
   // Enforce sequential module order — check if previous module is completed
-  if (userId && currentIndex > 0) {
+  if (!canManageTraining(user) && currentIndex > 0) {
     const prevModule = sortedModules[currentIndex - 1];
     const { data: prevCompletion } = await db
       .from("ModuleCompletion")
@@ -99,63 +98,93 @@ export default async function ModuleDetailPage({
       .from("ModuleCompletion")
       .select("id")
       .eq("userId", userId)
-      .eq("moduleId", module.id)
+      .eq("moduleId", trainingModule.id)
       .limit(1);
     isCompleted = (completionData || []).length > 0;
   }
 
-  const videos = module.assets.filter((a: any) => a.fileType === "VIDEO");
-  const documents = module.assets.filter((a: any) => ["PDF", "DOCUMENT", "CHECKLIST"].includes(a.fileType));
-  const images = module.assets.filter((a: any) => a.fileType === "IMAGE");
-  const printables = module.assets.filter((a: any) => a.isPrintable);
+  const requiresPractical = (trainingModule.tags || []).includes("practical-required");
+  const { data: practicalSignoff } = requiresPractical
+    ? await db.from("PracticalSignoff").select("status, signedAt, nextAuditAt").eq("userId", userId).eq("moduleId", trainingModule.id).maybeSingle()
+    : { data: null };
+
+  const review = !isCompleted
+    ? createReviewToken(user.id, trainingModule.id, user.skipReviewTimer)
+    : null;
+
+  const videos = trainingModule.assets.filter((a: any) => a.fileType === "VIDEO");
+  const documents = trainingModule.assets.filter((a: any) => ["PDF", "DOCUMENT", "CHECKLIST"].includes(a.fileType));
+  const images = trainingModule.assets.filter((a: any) => a.fileType === "IMAGE");
+  const printables = trainingModule.assets.filter((a: any) => a.isPrintable);
 
   return (
-    <div className="space-y-6 max-w-4xl">
-      <div className="flex items-center gap-3">
+    <article className="mx-auto max-w-5xl space-y-8 animate-fade-in">
+      <header className="relative overflow-hidden rounded-[2rem] bg-ditch-navy p-6 text-white shadow-[var(--shadow-lift)] sm:p-8">
+      <div className="flex items-start gap-4">
         <Link
           href={`/training/${sectionSlug}`}
-          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          aria-label="Back to training stage"
+          className="grid size-11 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.07] transition-colors hover:bg-white/15"
         >
-          <ArrowLeft className="w-5 h-5 text-gray-500" />
+          <ArrowLeft className="size-5 text-white/70" />
         </Link>
         <div className="flex-1">
-          <p className="text-sm text-ditch-orange font-medium">{module.section?.title}</p>
-          <h1 className="text-2xl font-bold text-gray-900">{module.title}</h1>
+          <p className="mb-2 text-[10px] font-extrabold uppercase tracking-[0.2em] text-ditch-seafoam">{trainingModule.section?.title}</p>
+          <h1 className="text-3xl font-black tracking-[-0.045em] sm:text-4xl">{trainingModule.title}</h1>
         </div>
         {isCompleted && (
           <Badge variant="completed" className="flex items-center gap-1 px-3 py-1">
-            <CheckCircle2 className="w-4 h-4" /> Completed
+            <CheckCircle2 className="w-4 h-4" /> {requiresPractical ? "Lesson reviewed" : "Completed"}
           </Badge>
         )}
       </div>
 
       {/* Meta Info */}
-      <div className="flex flex-wrap gap-3">
-        {module.isRequired && <Badge variant="required">Required</Badge>}
-        {module.estimatedMinutes && (
-          <span className="text-sm text-gray-500 flex items-center gap-1">
-            <Clock className="w-4 h-4" /> {formatDuration(module.estimatedMinutes)}
+      <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-white/10 pt-5">
+        {trainingModule.isRequired && <Badge variant="required">Required</Badge>}
+        {trainingModule.estimatedMinutes && (
+          <span className="flex items-center gap-1 text-xs font-bold text-white/55">
+            <Clock className="size-4" /> {formatDuration(trainingModule.estimatedMinutes)}
           </span>
         )}
-        {module.tags.length > 0 && module.tags.map((tag: string) => (
+        {trainingModule.tags.length > 0 && trainingModule.tags.map((tag: string) => (
           <Badge key={tag}>{tag}</Badge>
         ))}
       </div>
+      </header>
 
       {/* Description */}
-      {module.description && (
-        <Card>
-          <p className="text-gray-700 leading-relaxed">{module.description}</p>
+      {trainingModule.description && (
+        <Card className="border-l-4 border-l-ditch-orange">
+          <p className="text-base font-medium leading-7 text-ditch-navy/75">{trainingModule.description}</p>
         </Card>
       )}
 
       {/* Structured Content */}
-      <ModuleContent moduleId={module.id} fallbackHtml={module.content} />
+      <ModuleContent fallbackHtml={trainingModule.content} />
+
+      {requiresPractical && (
+        <Card className={`border-l-4 ${practicalSignoff?.status === "PASSED" ? "border-l-ditch-green bg-ditch-seafoam/15" : practicalSignoff?.status === "NEEDS_COACHING" ? "border-l-ditch-orange bg-ditch-sand/25" : "border-l-ditch-orange bg-white"}`}>
+          <div className="flex items-start gap-3">
+            <Award className="mt-0.5 size-5 shrink-0 text-ditch-orange" />
+            <div>
+              <h2 className="font-extrabold text-ditch-ink">
+                {practicalSignoff?.status === "PASSED" ? "Practical certified" : practicalSignoff?.status === "NEEDS_COACHING" ? "Another coached rep is required" : isCompleted ? "Lesson reviewed — practical signoff pending" : "This module requires observed floor proof"}
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-ditch-navy/65">
+                {practicalSignoff?.status === "PASSED"
+                  ? `Certified${practicalSignoff.signedAt ? ` ${formatDate(practicalSignoff.signedAt)}` : ""}.${practicalSignoff.nextAuditAt ? ` Next audit: ${formatDate(practicalSignoff.nextAuditAt)}.` : " Audit cycle complete."}`
+                  : "Completing the lesson records review only. A manager must observe the live practical, document evidence, and record the certification separately."}
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Videos */}
       {videos.length > 0 && (
         <Card>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <h2 className="mb-4 flex items-center gap-2 text-lg font-extrabold text-ditch-ink">
             <Video className="w-5 h-5 text-ditch-orange" /> Training Videos
           </h2>
           <div className="space-y-4">
@@ -191,11 +220,14 @@ export default async function ModuleDetailPage({
           <div className="space-y-4">
             {images.map((img: any) => (
               <div key={img.id}>
-                <img
+                <Image
                   src={img.fileUrl}
                   alt={img.fileName}
-                  className="w-full rounded-lg border border-gray-200"
-                  loading="lazy"
+                  width={1200}
+                  height={800}
+                  sizes="(max-width: 1024px) 100vw, 900px"
+                  unoptimized
+                  className="h-auto w-full rounded-2xl border border-ditch-navy/10"
                 />
                 <p className="text-sm text-gray-500 mt-2">{img.fileName}</p>
               </div>
@@ -207,7 +239,7 @@ export default async function ModuleDetailPage({
       {/* Documents — PDFs inline, others as download */}
       {documents.length > 0 && (
         <Card>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <h2 className="mb-4 flex items-center gap-2 text-lg font-extrabold text-ditch-ink">
             <FileText className="w-5 h-5 text-ditch-orange" /> Documents & Files
           </h2>
           <div className="space-y-4">
@@ -229,7 +261,7 @@ export default async function ModuleDetailPage({
                           <a href={doc.fileUrl} target="_blank" className="text-xs text-ditch-orange hover:underline">
                             Open in new tab
                           </a>
-                          <a href={doc.fileUrl} download className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors" title="Download">
+                          <a href={`${doc.fileUrl}?download=1`} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors" title="Download">
                             <Download className="w-4 h-4 text-gray-400" />
                           </a>
                         </div>
@@ -248,7 +280,7 @@ export default async function ModuleDetailPage({
                         <a href={doc.fileUrl} target="_blank" className="text-xs text-ditch-orange hover:underline">
                           View
                         </a>
-                        <a href={doc.fileUrl} download className="p-2 hover:bg-gray-200 rounded-lg transition-colors" title="Download">
+                        <a href={`${doc.fileUrl}?download=1`} className="p-2 hover:bg-gray-200 rounded-lg transition-colors" title="Download">
                           <Download className="w-4 h-4 text-gray-500" />
                         </a>
                       </div>
@@ -262,9 +294,15 @@ export default async function ModuleDetailPage({
       )}
 
       {/* Mark Complete */}
-      {userId && !isCompleted && (
+      {!isCompleted && review && (
         <div className="flex justify-end">
-          <MarkCompleteButton moduleId={module.id} skipReviewTimer={user?.skipReviewTimer} />
+          <MarkCompleteButton
+            moduleId={trainingModule.id}
+            reviewToken={review.token}
+            eligibleAt={review.eligibleAt}
+            skipReviewTimer={user.skipReviewTimer}
+            completionLabel={requiresPractical ? "Finish lesson review" : "Mark as complete"}
+          />
         </div>
       )}
 
@@ -278,7 +316,7 @@ export default async function ModuleDetailPage({
             {printables.map((doc: any) => (
               <a
                 key={doc.id}
-                href={`/print/${doc.id}`}
+                href={doc.fileUrl}
                 target="_blank"
                 className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
               >
@@ -298,19 +336,19 @@ export default async function ModuleDetailPage({
         {nextModule ? (
           <Link
             href={`/training/${sectionSlug}/${nextModule.slug}`}
-            className="inline-flex items-center gap-2 bg-ditch-navy text-white px-6 py-2.5 rounded-lg font-medium hover:bg-ditch-navy/90 transition-colors"
+            className="btn-secondary"
           >
             Next Module <ArrowRight className="w-4 h-4" />
           </Link>
         ) : isLastModule ? (
           <Link
             href={`/training/${sectionSlug}`}
-            className="inline-flex items-center gap-2 bg-ditch-navy text-white px-6 py-2.5 rounded-lg font-medium hover:bg-ditch-navy/90 transition-colors"
+            className="btn-secondary"
           >
             Back to Section <ArrowRight className="w-4 h-4" />
           </Link>
         ) : null}
       </div>
-    </div>
+    </article>
   );
 }

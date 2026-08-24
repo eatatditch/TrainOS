@@ -13,6 +13,8 @@ export interface Recipe {
   yield: string;
   shelfLife: string;
   allergyWarning: string;
+  trainingStatus: string;
+  locked: boolean;
   source: { title: string; section: string; sectionSlug: string; moduleSlug: string };
 }
 
@@ -26,6 +28,8 @@ export interface FoodItem {
   allergens: string[];
   dietary: string[];
   modifications: string;
+  allergyStatus: string;
+  allergyWarning: string;
   tags: string[];
   crossWarnings?: string[];
   linkedIngredients?: { id: string; name: string; allergens: string[]; notes: string }[];
@@ -39,11 +43,11 @@ export interface FoodList {
 
 export function RecipeCard({ recipe }: { recipe: Recipe }) {
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-      <div className="bg-gradient-to-r from-ditch-navy to-ditch-navy/80 px-6 py-4">
+    <div className="overflow-hidden rounded-[1.75rem] border border-ditch-navy/10 bg-white shadow-[var(--shadow-lift)]">
+      <div className="bg-gradient-to-r from-ditch-navy to-ditch-ink px-5 py-5 sm:px-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-white font-bold text-xl">{recipe.name}</h2>
-          {recipe.price && <span className="text-ditch-orange font-bold text-xl">{recipe.price}</span>}
+          <h2 className="text-xl font-black tracking-tight text-white sm:text-2xl">{recipe.name}</h2>
+          {recipe.price && <span className="text-xl font-black text-ditch-seafoam">{recipe.price}</span>}
         </div>
       </div>
       {recipe.allergyWarning && (
@@ -52,7 +56,15 @@ export function RecipeCard({ recipe }: { recipe: Recipe }) {
           <span className="text-sm font-medium text-red-700">{recipe.allergyWarning}</span>
         </div>
       )}
-      <div className="overflow-x-auto">
+      {recipe.locked && (
+        <div className="border-b border-red-200 bg-red-50 px-6 py-4" role="alert">
+          <p className="flex items-center gap-2 text-sm font-extrabold text-red-800">
+            <AlertTriangle className="size-4 shrink-0" /> Recipe locked — do not train or build from this record
+          </p>
+          <p className="mt-1 text-xs leading-5 text-red-700">{recipe.trainingStatus}. Ask a manager for the current approved recipe lock.</p>
+        </div>
+      )}
+      {!recipe.locked && <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
@@ -91,7 +103,7 @@ export function RecipeCard({ recipe }: { recipe: Recipe }) {
             </tr>
           </tbody>
         </table>
-      </div>
+      </div>}
       {recipe.note && (
         <div className="px-6 py-3 border-t border-gray-200 bg-gray-50">
           <p className="text-xs text-gray-500"><span className="font-semibold text-gray-700">Note:</span> {recipe.note}</p>
@@ -103,15 +115,15 @@ export function RecipeCard({ recipe }: { recipe: Recipe }) {
 
 export function FoodItemCard({ foodItem }: { foodItem: FoodItem }) {
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-      <div className="bg-gradient-to-r from-ditch-navy to-ditch-navy/80 px-6 py-4">
+    <div className="overflow-hidden rounded-[1.75rem] border border-ditch-navy/10 bg-white shadow-[var(--shadow-lift)]">
+      <div className="bg-gradient-to-r from-ditch-navy to-ditch-ink px-5 py-5 sm:px-6">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-ditch-orange text-xs uppercase tracking-widest font-semibold">{foodItem.category}</p>
-            <h2 className="text-white font-bold text-xl mt-0.5">{foodItem.name}</h2>
+            <h2 className="mt-0.5 text-xl font-black tracking-tight text-white sm:text-2xl">{foodItem.name}</h2>
             {foodItem.badge && <p className="text-gray-300 text-xs mt-0.5">{foodItem.badge}</p>}
           </div>
-          {foodItem.price && <span className="text-ditch-orange font-bold text-xl">{foodItem.price}</span>}
+          {foodItem.price && <span className="text-xl font-black text-ditch-seafoam">{foodItem.price}</span>}
         </div>
       </div>
       {foodItem.verdict && (
@@ -120,6 +132,15 @@ export function FoodItemCard({ foodItem }: { foodItem: FoodItem }) {
           <span className={`text-sm font-medium ${foodItem.verdict.safe ? "text-green-700" : "text-red-700"}`}>{foodItem.verdict.text}</span>
         </div>
       )}
+      <div className="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-6 py-3" role="note">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-700" />
+        <div>
+          <p className="text-xs font-extrabold uppercase tracking-wider text-amber-900">
+            {foodItem.allergyStatus || "Verification required"}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-amber-800">{foodItem.allergyWarning}</p>
+        </div>
+      </div>
       <div className="p-6 space-y-4">
         {foodItem.description && <p className="text-gray-700 text-sm leading-relaxed">{foodItem.description}</p>}
         {foodItem.ingredients && (
@@ -171,7 +192,7 @@ export function FoodListCard({ foodList, onItemClick }: { foodList: FoodList; on
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {foodList.items.map((item) => (
-          <button key={item.name} onClick={() => onItemClick(item.name)} className="text-left p-4 bg-white border border-gray-200 rounded-xl hover:border-ditch-orange transition-colors shadow-sm">
+          <button type="button" key={item.name} onClick={() => onItemClick(item.name)} className="rounded-2xl border border-ditch-navy/10 bg-white p-4 text-left shadow-[var(--shadow-surf)] transition-all hover:-translate-y-0.5 hover:border-ditch-orange/35 hover:shadow-[var(--shadow-lift)]">
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">{item.category}</p>

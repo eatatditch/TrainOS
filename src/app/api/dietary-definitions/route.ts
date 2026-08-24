@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getUser } from "@/lib/auth";
+import { MANAGER_ROLES, authorizeApi } from "@/lib/api-auth";
 
-// Public GET — used by training platform menu page to render definitions.
 export async function GET() {
+  const auth = await authorizeApi();
+  if (!auth.authorized) return auth.response;
+
   const { data } = await db
     .from("DietaryDefinition")
     .select("*")
@@ -12,13 +14,12 @@ export async function GET() {
 }
 
 async function assertAdmin() {
-  const user = await getUser();
-  if (!user || !["SUPER_ADMIN", "ADMIN", "MANAGER"].includes(user.role)) return false;
-  return true;
+  return authorizeApi(MANAGER_ROLES);
 }
 
 export async function PUT(request: NextRequest) {
-  if (!(await assertAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await assertAdmin();
+  if (!auth.authorized) return auth.response;
   const { key, label, short_description, full_description, safe_for_celiac, icon, sortOrder } =
     await request.json();
   if (!key) return NextResponse.json({ error: "key required" }, { status: 400 });
@@ -41,7 +42,8 @@ export async function PUT(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  if (!(await assertAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await assertAdmin();
+  if (!auth.authorized) return auth.response;
   const key = request.nextUrl.searchParams.get("key");
   if (!key) return NextResponse.json({ error: "key required" }, { status: 400 });
   await db.from("DietaryDefinition").delete().eq("key", key);

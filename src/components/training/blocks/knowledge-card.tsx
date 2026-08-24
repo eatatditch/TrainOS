@@ -19,13 +19,13 @@ export function KnowledgeCard({
 }: KnowledgeCardProps) {
   return (
     <div
-      className={`rounded-xl bg-white border border-gray-200 p-5 shadow-sm ${
+      className={`rounded-2xl border border-ditch-navy/10 bg-white p-5 shadow-[var(--shadow-surf)] ${
         highlight ? "border-l-4 border-l-ditch-orange" : ""
       }`}
     >
       <div className="flex items-start justify-between gap-3 mb-2">
         <div>
-          <h3 className="font-bold text-gray-900">{title}</h3>
+          <h3 className="font-extrabold tracking-tight text-ditch-ink">{title}</h3>
           {subtitle && (
             <p className="text-gray-500 text-xs mt-0.5">{subtitle}</p>
           )}
@@ -50,7 +50,7 @@ export function KnowledgeCard({
         </div>
       )}
 
-      <p className="text-gray-600 text-sm leading-relaxed">{description}</p>
+      <p className="text-sm leading-6 text-ditch-navy/70">{description}</p>
 
       {details && details.length > 0 && (
         <ul className="mt-3 space-y-1">

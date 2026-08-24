@@ -13,6 +13,8 @@ export interface AppUser {
   position: Position | null;
   /** Bypass the 5-minute review timer on training modules. Set per-employee in /admin/employees. */
   skipReviewTimer: boolean;
+  /** Force replacement of an administrator-issued or historical password. */
+  mustResetPassword: boolean;
 }
 
 /**
@@ -29,7 +31,7 @@ export async function getUser(): Promise<AppUser | null> {
 
   const { data: profile } = await db
     .from("User")
-    .select("id, authId, email, firstName, lastName, role, position, isActive, skipReviewTimer")
+    .select("id, authId, email, firstName, lastName, role, position, isActive, skipReviewTimer, mustResetPassword")
     .eq("authId", authUser.id)
     .eq("isActive", true)
     .single();
@@ -45,5 +47,6 @@ export async function getUser(): Promise<AppUser | null> {
     role: profile.role as AppUser["role"],
     position: (profile.position as Position) ?? null,
     skipReviewTimer: !!profile.skipReviewTimer,
+    mustResetPassword: !!profile.mustResetPassword,
   };
 }

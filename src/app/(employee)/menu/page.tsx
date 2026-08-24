@@ -15,6 +15,8 @@ interface FoodItem {
   allergens: string[];
   dietary: string[];
   modifications: string;
+  allergyStatus: string;
+  allergyWarning: string;
   tags: string[];
   crossWarnings?: string[];
   verdict?: { safe: boolean; text: string } | null;
@@ -50,7 +52,10 @@ export default function MenuPage() {
   const [searched, setSearched] = useState(false);
   const [definitions, setDefinitions] = useState<Definition[]>([]);
   const [expandedDef, setExpandedDef] = useState<string | null>(null);
+  const [searchError, setSearchError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const requestIdRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     fetch("/api/dietary-definitions")
@@ -58,35 +63,50 @@ export default function MenuPage() {
       .then((data) => setDefinitions(Array.isArray(data) ? data : []));
   }, []);
 
+  useEffect(() => () => abortRef.current?.abort(), []);
+
   const doSearch = useCallback(async (q: string) => {
+    const requestId = ++requestIdRef.current;
+    abortRef.current?.abort();
     if (!q.trim()) {
       setFoodItem(null);
       setFoodList(null);
       setAiAnswer(null);
+      setSearchError("");
       setSearched(false);
+      setLoading(false);
       return;
     }
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setFoodItem(null);
+    setFoodList(null);
+    setAiAnswer(null);
+    setSearchError("");
     setLoading(true);
     setSearched(true);
-    // Always keep the loader visible for at least 5s so the Paloma surfer
-    // gets his moment even when the API responds quickly.
+    // Keep a brief loading transition so results do not visually flicker.
     const start = Date.now();
     try {
-      const res = await fetch(`/api/search/answer?q=${encodeURIComponent(q)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setFoodItem(data.foodItem);
-        setFoodList(data.foodList);
-        setAiAnswer(data.aiAnswer);
-      }
-    } catch {
-      // silent
-    } finally {
+      const res = await fetch(`/api/search/answer?q=${encodeURIComponent(q)}`, {
+        signal: controller.signal,
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "Menu lookup failed. Try again.");
       const elapsed = Date.now() - start;
-      if (elapsed < 5000) {
-        await new Promise((r) => setTimeout(r, 5000 - elapsed));
+      if (elapsed < 600) {
+        await new Promise((resolve) => setTimeout(resolve, 600 - elapsed));
       }
-      setLoading(false);
+      if (requestId !== requestIdRef.current) return;
+      setFoodItem(data.foodItem);
+      setFoodList(data.foodList);
+      setAiAnswer(data.aiAnswer);
+    } catch (error) {
+      if (controller.signal.aborted || requestId !== requestIdRef.current) return;
+      setSearchError(error instanceof Error ? error.message : "Menu lookup failed. Try again.");
+    } finally {
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }, []);
 
@@ -96,27 +116,34 @@ export default function MenuPage() {
   };
 
   const clearSearch = () => {
+    requestIdRef.current += 1;
+    abortRef.current?.abort();
     setQuery("");
     setFoodItem(null);
     setFoodList(null);
     setAiAnswer(null);
+    setSearchError("");
     setSearched(false);
+    setLoading(false);
     inputRef.current?.focus();
   };
 
   return (
-    <div className="space-y-6 max-w-4xl">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-          <Utensils className="w-6 h-6 text-ditch-orange" /> Menu & Allergens
+    <div className="mx-auto max-w-5xl space-y-7 animate-fade-in">
+      <section className="relative overflow-hidden rounded-[2rem] bg-ditch-navy p-6 text-white shadow-[var(--shadow-lift)] sm:p-8">
+        <div className="pointer-events-none absolute -right-24 -top-28 size-80 rounded-full border-[72px] border-ditch-seafoam/[0.07]" />
+        <div className="relative">
+        <p className="mb-2 text-[10px] font-extrabold uppercase tracking-[0.22em] text-ditch-seafoam">Menu intelligence</p>
+        <h1 className="flex items-center gap-3 text-3xl font-black tracking-[-0.045em] sm:text-4xl">
+          <Utensils className="size-7 text-ditch-orange" /> Know what we serve.
         </h1>
-        <p className="text-gray-500 mt-1 text-sm">
-          Live reference for every menu item, ingredient list, allergens, and dietary info. Updated in real time as the kitchen changes things.
+        <p className="mt-3 max-w-2xl text-sm leading-6 text-white/60">
+          Find a dish, ingredient, dietary option, or allergen note before you answer the guest.
         </p>
-      </div>
+        </div>
 
-      <form onSubmit={(e) => { e.preventDefault(); doSearch(query); inputRef.current?.blur(); }} className="relative">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+      <form role="search" onSubmit={(e) => { e.preventDefault(); doSearch(query); inputRef.current?.blur(); }} className="relative mt-7">
+        <Search className="absolute left-4 top-1/2 size-5 -translate-y-1/2 text-ditch-navy/35" />
         <input
           ref={inputRef}
           type="search"
@@ -124,17 +151,20 @@ export default function MenuPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search a dish, ask a question, or filter by diet..."
-          className="w-full pl-12 pr-12 py-3.5 rounded-xl bg-white border border-gray-200 text-gray-900 placeholder-gray-400 focus:border-ditch-orange focus:ring-0 focus:outline-none text-base"
+          className="search-field py-4 pl-12 pr-12 text-base"
         />
         {loading && <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-ditch-orange animate-spin" />}
         {query && !loading && (
-          <button type="button" onClick={clearSearch} className="absolute right-4 top-1/2 -translate-y-1/2 p-1 hover:bg-gray-100 rounded-full">
+          <button type="button" aria-label="Clear search" onClick={clearSearch} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-xl p-2 hover:bg-ditch-navy/[0.06]">
             <X className="w-4 h-4 text-gray-400" />
           </button>
         )}
       </form>
+      </section>
 
       {!searched && (
+        <div>
+          <p className="mb-3 text-[10px] font-extrabold uppercase tracking-[0.16em] text-ditch-navy/45">Quick lookups</p>
         <div className="flex flex-wrap gap-2">
           {[
             "Gluten-free items",
@@ -144,17 +174,18 @@ export default function MenuPage() {
             "Pescatarian options",
             "Baja Fish Taco",
             "Lobster Roll",
-            "Poké Bowl",
-            "Kids menu",
+            "Poke Bowl",
+            "Taco 12-pack",
           ].map((label) => (
             <button
               key={label}
               onClick={() => runSearch(label)}
-              className="px-3 py-1.5 bg-white border border-gray-200 rounded-full text-sm text-gray-600 hover:border-ditch-orange hover:text-ditch-orange"
+              className="rounded-full border border-ditch-navy/10 bg-white px-3.5 py-2 text-xs font-semibold text-ditch-navy/65 shadow-sm transition-all hover:-translate-y-0.5 hover:border-ditch-orange/40 hover:text-ditch-orange"
             >
               {label}
             </button>
           ))}
+        </div>
         </div>
       )}
 
@@ -162,8 +193,14 @@ export default function MenuPage() {
         <SurfingLoader />
       )}
 
+      {searched && !loading && searchError ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800" role="alert">
+          {searchError} No previous result is being shown. Verify urgent allergy questions directly with a manager and the kitchen.
+        </div>
+      ) : null}
+
       {searched && !loading && foodItem && (
-        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div className="overflow-hidden rounded-[1.75rem] border border-ditch-navy/10 bg-white shadow-[var(--shadow-lift)]">
           <div className="bg-gradient-to-r from-ditch-navy to-ditch-navy/80 px-6 py-4">
             <div className="flex items-center justify-between">
               <div>
@@ -191,6 +228,16 @@ export default function MenuPage() {
               </span>
             </div>
           )}
+
+          <div className="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-6 py-3" role="note">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-700" />
+            <div>
+              <p className="text-xs font-extrabold uppercase tracking-wider text-amber-900">
+                {foodItem.allergyStatus || "Verification required"}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-amber-800">{foodItem.allergyWarning}</p>
+            </div>
+          </div>
 
           <div className="p-6 space-y-4">
             {foodItem.description && <p className="text-gray-700 text-sm leading-relaxed">{foodItem.description}</p>}
@@ -333,7 +380,7 @@ export default function MenuPage() {
         </div>
       )}
 
-      {searched && !loading && !foodItem && !foodList && !aiAnswer && (
+      {searched && !loading && !searchError && !foodItem && !foodList && !aiAnswer && (
         <div className="text-center py-8">
           <Sparkles className="w-6 h-6 text-gray-300 mx-auto mb-2" />
           <p className="text-gray-500 text-sm">No results found. Try a different search.</p>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
+import Image from "next/image";
 
 interface PalomaManProps {
   /** A short message in his speech bubble. If omitted, a random tip is used. */
@@ -24,11 +25,11 @@ const TIPS = [
   "Daily 86'd items? Check with the manager before each shift.",
   "When in doubt, search SpecOS — instant answers, every spec.",
   "Greet every guest within 30 seconds of seating.",
-  "Wing sauce options change — ask the kitchen daily.",
-  "Cocktail garnishes matter. Presentation = perception.",
-  "Suggest the Hang 10 Combo to groups — it's the best value starter.",
-  "Lobster Roll: confirm hot vs cold with the guest.",
-  "Tres leches contains dairy. Always.",
+  "If a detail may have changed, verify it before you promise it.",
+  "Cocktail garnishes matter. Presentation sets the expectation.",
+  "Make one thoughtful recommendation instead of listing the whole menu.",
+  "Read the table before you approach it — awareness is hospitality.",
+  "Own the follow-through. A promise without action is just noise.",
   "Smile. The guest can hear it through the headset, the host stand, and the table.",
   "Refill water before they ask.",
   "Got a celiac guest? Skip anything with 'gluten-friendly' — that's not the same as gluten-free.",
@@ -49,16 +50,24 @@ export function PalomaMan({
   speech = true,
 }: PalomaManProps) {
   const [dismissed, setDismissed] = useState(false);
-  const [tip, setTip] = useState<string>(message || TIPS[0]);
+  const [tipIndex, setTipIndex] = useState(0);
+  const tip = message || TIPS[tipIndex];
 
   useEffect(() => {
-    if (dismissKey && typeof window !== "undefined") {
+    if (!dismissKey) return;
+    const timeout = window.setTimeout(() => {
       if (localStorage.getItem(`paloma-${dismissKey}`)) setDismissed(true);
-    }
-    if (!message) {
-      setTip(TIPS[Math.floor(Math.random() * TIPS.length)]);
-    }
-  }, [dismissKey, message]);
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [dismissKey]);
+
+  useEffect(() => {
+    if (message) return;
+    const interval = window.setInterval(() => {
+      setTipIndex((index) => (index + 1) % TIPS.length);
+    }, 12000);
+    return () => window.clearInterval(interval);
+  }, [message]);
 
   useEffect(() => {
     if (autoDismiss > 0) {
@@ -90,8 +99,8 @@ export function PalomaMan({
   return (
     <div className={`${positionClass} flex items-end gap-2 animate-fade-in`}>
       {speech && (
-        <div className={`relative bg-white border border-gray-200 rounded-2xl shadow-sm px-3 py-2 ${bubble}`}>
-          <p className="text-gray-800 leading-snug pr-3">{tip}</p>
+        <div className={`relative rounded-2xl border border-ditch-navy/10 bg-white px-3.5 py-3 shadow-[var(--shadow-surf)] ${bubble}`}>
+          <p className="pr-3 font-medium leading-snug text-ditch-ink">{tip}</p>
           <button
             onClick={handleDismiss}
             className="absolute top-1 right-1 p-0.5 text-gray-400 hover:text-gray-600 rounded-full"
@@ -110,11 +119,12 @@ export function PalomaMan({
           />
         </div>
       )}
-      <img
-        src="/api/mascot/paloma?v=2"
+      <Image
+        src="/paloma-man.svg"
         alt="Paloma Man"
         width={img}
         height={img}
+        unoptimized
         className="select-none drop-shadow-md"
         style={{ width: img, height: img, objectFit: "contain" }}
       />

@@ -109,7 +109,7 @@ export default function EditModulePage({ params }: { params: Promise<{ id: strin
   };
 
   const handleDelete = async () => {
-    if (!confirm("Delete this module? This cannot be undone.")) return;
+    if (!confirm("Archive this module? It will leave current training, but historical records and files will be preserved.")) return;
     await fetch(`/api/admin/modules/${id}`, { method: "DELETE" });
     router.push("/admin/content");
   };

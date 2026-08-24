@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/server";
 import { db } from "@/lib/db";
-import { assignPathsForPosition } from "@/lib/assignPaths";
+import { assignPathsForPosition, assignTrainingPathToUser } from "@/lib/assignPaths";
+import { ADMIN_ROLES, MANAGER_ROLES, authorizeApi } from "@/lib/api-auth";
+import { validatePassword } from "@/lib/password-policy";
 
 export async function GET(request: NextRequest) {
-  const user = await getUser();
-  if (!user || !["SUPER_ADMIN", "ADMIN", "MANAGER"].includes(user.role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-  }
+  const auth = await authorizeApi(MANAGER_ROLES);
+  if (!auth.authorized) return auth.response;
 
   const role = request.nextUrl.searchParams.get("role");
   const location = request.nextUrl.searchParams.get("location");
@@ -17,49 +16,140 @@ export async function GET(request: NextRequest) {
 
   let query = db
     .from("User")
-    .select("id, email, firstName, lastName, role, position, location, phone, hireDate, isActive, skipReviewTimer, createdAt")
+    .select("id, email, firstName, lastName, role, position, location, phone, hireDate, isActive, skipReviewTimer, mustResetPassword, createdAt")
     .order("lastName");
 
   if (role) query = query.eq("role", role);
   if (location) query = query.eq("location", location);
   if (position) query = query.eq("position", position);
 
-  const { data: users } = await query;
+  const { data: users, error: usersError } = await query;
+  if (usersError) {
+    return NextResponse.json({ error: "Unable to load employees" }, { status: 500 });
+  }
+  const userIds = (users || []).map((user) => user.id);
+  if (userIds.length === 0) return NextResponse.json([]);
 
-  // Fetch counts and training path assignments
-  const usersWithData = await Promise.all(
-    (users || []).map(async (u: any) => {
-      const [{ count: assignmentCount }, { count: completionCount }, { data: paths }] = await Promise.all([
-        db.from("ModuleAssignment").select("*", { count: "exact", head: true }).eq("userId", u.id),
-        db.from("ModuleCompletion").select("*", { count: "exact", head: true }).eq("userId", u.id),
-        db.from("UserTrainingPath").select("*, trainingPath:TrainingPath(id, title)").eq("userId", u.id),
-      ]);
-      return {
-        ...u,
-        _count: {
-          assignments: assignmentCount || 0,
-          completions: completionCount || 0,
-        },
-        trainingPaths: (paths || []).map((p: any) => p.trainingPath).filter(Boolean),
-      };
-    })
+  // One current-curriculum snapshot replaces the previous per-user N+1 query.
+  // Legacy completions and path links remain in the database for history, but
+  // never inflate the active scorecard or surface as assignable path chips.
+  const [assignmentsResult, completionsResult, pathsResult] = await Promise.all([
+    db
+      .from("ModuleAssignment")
+      .select("userId, moduleId, module:Module(isActive, section:Section(isActive))")
+      .in("userId", userIds)
+      .eq("isActive", true),
+    db
+      .from("ModuleCompletion")
+      .select("userId, moduleId, module:Module(isActive, section:Section(isActive))")
+      .in("userId", userIds),
+    db
+      .from("UserTrainingPath")
+      .select("userId, trainingPath:TrainingPath(id, title, isActive)")
+      .in("userId", userIds)
+      .eq("isActive", true),
+  ]);
+  const relatedError = assignmentsResult.error || completionsResult.error || pathsResult.error;
+  if (relatedError) {
+    return NextResponse.json({ error: "Unable to load current training progress" }, { status: 500 });
+  }
+
+  const activeAssignments = (assignmentsResult.data || []).filter((assignment) => {
+    const trainingModule = assignment.module as unknown as {
+      isActive?: boolean;
+      section?: { isActive?: boolean } | null;
+    } | null;
+    return trainingModule?.isActive && trainingModule.section?.isActive;
+  });
+  const assignmentPairs = new Set(
+    activeAssignments.map((assignment) => `${assignment.userId}:${assignment.moduleId}`),
   );
+  const activeCompletions = (completionsResult.data || []).filter((completion) => {
+    const trainingModule = completion.module as unknown as {
+      isActive?: boolean;
+      section?: { isActive?: boolean } | null;
+    } | null;
+    return (
+      trainingModule?.isActive &&
+      trainingModule.section?.isActive &&
+      assignmentPairs.has(`${completion.userId}:${completion.moduleId}`)
+    );
+  });
+
+  const assignmentCounts = new Map<string, number>();
+  const completionCounts = new Map<string, number>();
+  for (const assignment of activeAssignments) {
+    assignmentCounts.set(assignment.userId, (assignmentCounts.get(assignment.userId) || 0) + 1);
+  }
+  for (const completion of activeCompletions) {
+    completionCounts.set(completion.userId, (completionCounts.get(completion.userId) || 0) + 1);
+  }
+  const pathsByUser = new Map<string, Array<{ id: string; title: string }>>();
+  for (const link of pathsResult.data || []) {
+    const trainingPath = link.trainingPath as unknown as {
+      id?: string;
+      title?: string;
+      isActive?: boolean;
+    } | null;
+    if (!trainingPath?.isActive || !trainingPath.id || !trainingPath.title) continue;
+    const paths = pathsByUser.get(link.userId) || [];
+    if (!paths.some((path) => path.id === trainingPath.id)) {
+      paths.push({ id: trainingPath.id, title: trainingPath.title });
+      pathsByUser.set(link.userId, paths);
+    }
+  }
+
+  const usersWithData = (users || []).map((user) => ({
+    ...user,
+    _count: {
+      assignments: assignmentCounts.get(user.id) || 0,
+      completions: completionCounts.get(user.id) || 0,
+    },
+    trainingPaths: pathsByUser.get(user.id) || [],
+  }));
 
   return NextResponse.json(usersWithData);
 }
 
 export async function POST(request: NextRequest) {
-  const adminUser = await getUser();
-  if (!adminUser || !["SUPER_ADMIN", "ADMIN"].includes(adminUser.role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-  }
+  const auth = await authorizeApi(ADMIN_ROLES);
+  if (!auth.authorized) return auth.response;
+  const adminUser = auth.user;
 
   const data = await request.json();
+  const email = typeof data.email === "string" ? data.email.trim().toLowerCase() : "";
+  const password = typeof data.password === "string" ? data.password : "";
+
+  if (!email || !data.firstName?.trim() || !data.lastName?.trim()) {
+    return NextResponse.json(
+      { error: "First name, last name, and email are required" },
+      { status: 400 },
+    );
+  }
+
+  const passwordError = validatePassword(password);
+  if (passwordError) {
+    return NextResponse.json(
+      { error: passwordError },
+      { status: 400 },
+    );
+  }
+
+  const requestedRole = data.role || "EMPLOYEE";
+  if (
+    adminUser.role !== "SUPER_ADMIN" &&
+    ["SUPER_ADMIN", "ADMIN"].includes(requestedRole)
+  ) {
+    return NextResponse.json(
+      { error: "Only a super admin can create an admin account" },
+      { status: 403 },
+    );
+  }
 
   const { data: existing } = await db
     .from("User")
     .select("*")
-    .eq("email", data.email)
+    .eq("email", email)
     .single();
 
   if (existing) {
@@ -68,8 +158,8 @@ export async function POST(request: NextRequest) {
 
   const supabaseAdmin = await createAdminClient();
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-    email: data.email,
-    password: data.password || "ditch2024",
+    email,
+    password,
     email_confirm: true,
   });
 
@@ -81,35 +171,51 @@ export async function POST(request: NextRequest) {
     .from("User")
     .insert({
       authId: authData.user.id,
-      email: data.email,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      role: data.role || "EMPLOYEE",
+      email,
+      firstName: data.firstName.trim(),
+      lastName: data.lastName.trim(),
+      role: requestedRole,
       position: data.position || null,
       location: data.location || "",
       phone: data.phone || "",
       hireDate: data.hireDate ? new Date(data.hireDate).toISOString() : new Date().toISOString(),
       isActive: true,
+      mustResetPassword: true,
     })
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  // Assign training paths if provided
-  if (data.trainingPathIds && data.trainingPathIds.length > 0) {
-    await db.from("UserTrainingPath").insert(
-      data.trainingPathIds.map((pathId: string) => ({
-        userId: newUser.id,
-        trainingPathId: pathId,
-        dueDate: data.dueDate || null,
-        assignedReason: "manual",
-      }))
-    );
+  if (error) {
+    // Avoid leaving an orphaned Auth identity when profile creation fails.
+    await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Fan out position-driven paths + module assignments from hireDate.
-  await assignPathsForPosition(newUser.id, newUser.position, newUser.hireDate, adminUser.id);
+  // Keep the Auth identity, employee profile, and initial curriculum rollout
+  // all-or-nothing from the administrator's perspective. Each database RPC is
+  // atomic; deleting a brand-new profile cascades any earlier path links if a
+  // later initial assignment fails.
+  try {
+    if (data.trainingPathIds && data.trainingPathIds.length > 0) {
+      const trainingPathIds = Array.from(
+        new Set<string>(
+          (data.trainingPathIds as unknown[]).filter(
+            (value: unknown): value is string => typeof value === "string",
+          ),
+        ),
+      );
+      for (const pathId of trainingPathIds) {
+        await assignTrainingPathToUser(newUser.id, pathId, adminUser.id, newUser.hireDate, data.dueDate || null);
+      }
+    }
+
+    // Fan out all-team and position-driven paths from the controlled registry.
+    await assignPathsForPosition(newUser.id, newUser.position, newUser.hireDate, adminUser.id);
+  } catch (assignmentError) {
+    await db.from("User").delete().eq("id", newUser.id);
+    await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
+    return NextResponse.json({ error: assignmentError instanceof Error ? assignmentError.message : "Training assignment failed" }, { status: 500 });
+  }
 
   return NextResponse.json({ id: newUser.id, email: newUser.email, firstName: newUser.firstName, lastName: newUser.lastName });
 }

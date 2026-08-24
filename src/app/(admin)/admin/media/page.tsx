@@ -33,10 +33,11 @@ export default function MediaLibraryPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Media Library</h1>
-        <p className="text-gray-500 mt-1">Upload and manage training assets</p>
+    <div className="space-y-8 animate-fade-in">
+      <div className="shell-card p-6 sm:p-7">
+        <p className="page-kicker">Training resources</p>
+        <h1 className="page-title">Asset library</h1>
+        <p className="page-subtitle">Upload and manage the files that support the playbook.</p>
       </div>
 
       <Card>

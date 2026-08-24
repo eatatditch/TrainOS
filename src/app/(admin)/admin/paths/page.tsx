@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -50,11 +50,7 @@ export default function PathsPage() {
   const [editing, setEditing] = useState<TrainingPath | null>(null);
   const [form, setForm] = useState({ ...emptyForm });
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     const [pathRes, modRes] = await Promise.all([
       fetch("/api/admin/paths", { cache: "no-store" }),
       fetch("/api/admin/modules", { cache: "no-store" }),
@@ -64,7 +60,13 @@ export default function PathsPage() {
     setPaths(pathData);
     setModules(modData);
     setLoading(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    // The state updates occur only after both network requests resolve.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchData();
+  }, [fetchData]);
 
   const openNew = () => {
     setEditing(null);
@@ -113,8 +115,13 @@ export default function PathsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this training path? This cannot be undone.")) return;
-    await fetch(`/api/admin/paths/${id}`, { method: "DELETE" });
+    if (!confirm("Archive this training path? Existing training history will be retained.")) return;
+    const response = await fetch(`/api/admin/paths/${id}`, { method: "DELETE" });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      alert(`Archive failed: ${body.error || response.statusText}`);
+      return;
+    }
     fetchData();
   };
 
@@ -134,11 +141,12 @@ export default function PathsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8 animate-fade-in">
+      <div className="shell-card flex flex-col gap-5 p-6 sm:flex-row sm:items-end sm:justify-between sm:p-7">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Training Paths</h1>
-          <p className="text-gray-500 mt-1">Organize modules into structured learning paths</p>
+          <p className="page-kicker">Role-based growth</p>
+          <h1 className="page-title">Learning paths</h1>
+          <p className="page-subtitle">Turn playbook modules into a clear sequence for each role.</p>
         </div>
         <Button onClick={openNew} className="flex items-center gap-2">
           <Plus className="w-4 h-4" /> Create Path
@@ -173,12 +181,14 @@ export default function PathsPage() {
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => openEdit(path)}
+                    aria-label={`Edit ${path.title}`}
                     className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   >
                     <Edit2 className="w-4 h-4 text-gray-400" />
                   </button>
                   <button
                     onClick={() => handleDelete(path.id)}
+                    aria-label={`Archive ${path.title}`}
                     className="p-2 hover:bg-red-50 rounded-lg transition-colors"
                   >
                     <Trash2 className="w-4 h-4 text-red-400" />

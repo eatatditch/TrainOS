@@ -1,61 +1,66 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { isPosition } from "@/lib/positions";
+import { ADMIN_ROLES, authorizeApi } from "@/lib/api-auth";
 
 function sanitizePositions(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
   return Array.from(new Set(input.filter(isPosition)));
 }
 
-export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = await getUser();
-  if (!user || !["SUPER_ADMIN", "ADMIN"].includes(user.role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-  }
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const auth = await authorizeApi(ADMIN_ROLES);
+  if (!auth.authorized) return auth.response;
 
   const { id } = await params;
-  const data = await request.json();
-
-  const update: Record<string, unknown> = {
-    title: data.title,
-    description: data.description,
-    isActive: data.isActive,
-    targetPositions: sanitizePositions(data.targetPositions),
-  };
-  if (typeof data.targetRole === "string") update.targetRole = data.targetRole;
-
-  const { data: path, error } = await db
-    .from("TrainingPath")
-    .update(update)
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  if (data.moduleIds) {
-    await db.from("TrainingPathModule").delete().eq("trainingPathId", id);
-    await db.from("TrainingPathModule").insert(
-      data.moduleIds.map((moduleId: string, i: number) => ({
-        trainingPathId: id,
-        moduleId,
-        sortOrder: i,
-        isRequired: true,
-      }))
-    );
+  const body = await request.json().catch(() => null);
+  const title = typeof body?.title === "string" ? body.title.trim() : "";
+  if (!title) {
+    return NextResponse.json({ error: "Title is required" }, { status: 400 });
   }
+  const moduleIds = Array.isArray(body.moduleIds)
+    ? Array.from(
+        new Set(
+          body.moduleIds.filter(
+            (moduleId: unknown): moduleId is string =>
+              typeof moduleId === "string" && moduleId.length > 0,
+          ),
+        ),
+      )
+    : null;
 
-  return NextResponse.json(path);
+  const { data, error } = await db.rpc("update_training_path_atomic", {
+    p_training_path_id: id,
+    p_title: title,
+    p_description: typeof body.description === "string" ? body.description : "",
+    p_is_active: typeof body.isActive === "boolean" ? body.isActive : true,
+    p_target_role: typeof body.targetRole === "string" ? body.targetRole : "",
+    p_target_positions: sanitizePositions(body.targetPositions),
+    p_module_ids: moduleIds,
+    p_assigned_by_id: auth.user.id,
+  });
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  return NextResponse.json(data);
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = await getUser();
-  if (!user || !["SUPER_ADMIN", "ADMIN"].includes(user.role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-  }
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const auth = await authorizeApi(ADMIN_ROLES);
+  if (!auth.authorized) return auth.response;
 
   const { id } = await params;
-  await db.from("TrainingPath").delete().eq("id", id);
-  return NextResponse.json({ success: true });
+  const { data, error } = await db.rpc("archive_training_path_atomic", {
+    p_training_path_id: id,
+  });
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ success: true, ...(data || {}) });
 }

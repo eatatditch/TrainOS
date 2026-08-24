@@ -11,7 +11,7 @@ const columnClasses = {
 
 export function CardGrid({ columns = 2, children }: CardGridProps) {
   return (
-    <div className={`grid ${columnClasses[columns]} gap-4 my-4`}>
+    <div className={`my-5 grid ${columnClasses[columns]} gap-4`}>
       {children}
     </div>
   );

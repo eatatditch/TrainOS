@@ -1,132 +1,92 @@
 import { db } from "@/lib/db";
-import { isPosition } from "@/lib/positions";
-
-type TrainingPathRow = {
-  id: string;
-  moduleIntervalDays: number | null;
-};
-
-type TrainingPathModuleRow = {
-  moduleId: string;
-  sortOrder: number | null;
-  isRequired: boolean | null;
-};
 
 export type AssignPathsResult = {
   pathsAdded: number;
   modulesAdded: number;
 };
 
-function toDate(input: Date | string | null | undefined): Date {
-  if (input instanceof Date) return input;
-  if (typeof input === "string" && input) {
-    const parsed = new Date(input);
-    if (!Number.isNaN(parsed.valueOf())) return parsed;
+export type AssignTrainingPathResult = AssignPathsResult & {
+  alreadyAssigned: boolean;
+};
+
+function timestamp(value: Date | string | null | undefined) {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string" && value) {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.valueOf())) return parsed.toISOString();
   }
-  return new Date();
+  return null;
 }
 
-function dayOffset(base: Date, days: number): string {
-  const d = new Date(base);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString();
+function asCount(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-/**
- * Create UserTrainingPath + ModuleAssignment rows for every active path
- * whose targetPositions include the user's position. Safe to re-run — it
- * skips paths the user is already on and modules they're already assigned.
- *
- * Existing path assignments are left alone when a user's position changes;
- * a manager handles cleanup of obsolete paths.
- */
+/** Assign a path and its module provenance in one locked database transaction. */
+export async function assignTrainingPathToUser(
+  userId: string,
+  trainingPathId: string,
+  assignedById: string | null,
+  startDate: Date | string | null | undefined = new Date(),
+  requestedPathDueDate: Date | string | null | undefined = null,
+): Promise<AssignTrainingPathResult> {
+  const { data, error } = await db.rpc("assign_training_path_atomic", {
+    p_user_id: userId,
+    p_training_path_id: trainingPathId,
+    p_assigned_by_id: assignedById,
+    p_start_at: timestamp(startDate) || new Date().toISOString(),
+    p_requested_due_at: timestamp(requestedPathDueDate),
+    p_reason: "manual",
+  });
+  if (error) throw new Error(error.message);
+  const result = (data || {}) as Record<string, unknown>;
+  return {
+    pathsAdded: asCount(result.pathsAdded),
+    modulesAdded: asCount(result.modulesAdded),
+    alreadyAssigned: result.alreadyAssigned === true,
+  };
+}
+
+/** Remove a path source and only delete assignments that have no source left. */
+export async function removeTrainingPathFromUser(
+  userId: string,
+  trainingPathId: string,
+) {
+  const { error } = await db.rpc("remove_training_path_atomic", {
+    p_user_id: userId,
+    p_training_path_id: trainingPathId,
+  });
+  if (error) throw new Error(error.message);
+}
+
+/** Reconcile every assignee after an administrator changes path membership. */
+export async function reconcileTrainingPathAssignments(
+  trainingPathId: string,
+  assignedById: string | null,
+) {
+  const { error } = await db.rpc("reconcile_training_path_atomic", {
+    p_training_path_id: trainingPathId,
+    p_assigned_by_id: assignedById,
+  });
+  if (error) throw new Error(error.message);
+}
+
+/** Assign all all-team and position-matched paths atomically. The database reads
+ * the employee's current position/hire date while holding the employee lock. */
 export async function assignPathsForPosition(
   userId: string,
-  position: string | null | undefined,
-  hireDate: Date | string | null | undefined,
+  _position: string | null | undefined,
+  _hireDate: Date | string | null | undefined,
   assignedById: string | null = null,
 ): Promise<AssignPathsResult> {
-  if (!position || !isPosition(position)) {
-    return { pathsAdded: 0, modulesAdded: 0 };
-  }
-
-  const { data: paths } = await db
-    .from("TrainingPath")
-    .select("id, moduleIntervalDays")
-    .eq("isActive", true)
-    .contains("targetPositions", [position]);
-
-  const matchingPaths = (paths as TrainingPathRow[] | null) ?? [];
-  if (matchingPaths.length === 0) return { pathsAdded: 0, modulesAdded: 0 };
-
-  const { data: existingLinks } = await db
-    .from("UserTrainingPath")
-    .select("trainingPathId")
-    .eq("userId", userId);
-
-  const alreadyOn = new Set(
-    (existingLinks ?? []).map((r: { trainingPathId: string }) => r.trainingPathId),
-  );
-
-  const base = toDate(hireDate);
-  let pathsAdded = 0;
-  let modulesAdded = 0;
-
-  for (const path of matchingPaths) {
-    if (alreadyOn.has(path.id)) continue;
-
-    const interval = path.moduleIntervalDays && path.moduleIntervalDays > 0
-      ? path.moduleIntervalDays
-      : 7;
-
-    const { data: pathModules } = await db
-      .from("TrainingPathModule")
-      .select("moduleId, sortOrder, isRequired")
-      .eq("trainingPathId", path.id)
-      .order("sortOrder", { ascending: true });
-
-    const modules = (pathModules as TrainingPathModuleRow[] | null) ?? [];
-    const pathDueDate = modules.length > 0
-      ? dayOffset(base, interval * modules.length)
-      : null;
-
-    const { error: linkError } = await db.from("UserTrainingPath").insert({
-      userId,
-      trainingPathId: path.id,
-      dueDate: pathDueDate,
-      assignedReason: "position",
-    });
-    if (linkError) continue;
-    pathsAdded += 1;
-
-    if (modules.length === 0) continue;
-
-    const { data: existingAssignments } = await db
-      .from("ModuleAssignment")
-      .select("moduleId")
-      .eq("userId", userId)
-      .in("moduleId", modules.map((m) => m.moduleId));
-
-    const alreadyAssigned = new Set(
-      (existingAssignments ?? []).map((r: { moduleId: string }) => r.moduleId),
-    );
-
-    const newRows = modules
-      .map((m, orderIndex) => ({ m, orderIndex }))
-      .filter(({ m }) => !alreadyAssigned.has(m.moduleId))
-      .map(({ m, orderIndex }) => ({
-        userId,
-        moduleId: m.moduleId,
-        assignedById,
-        isRequired: m.isRequired ?? true,
-        dueDate: dayOffset(base, interval * (orderIndex + 1)),
-      }));
-
-    if (newRows.length > 0) {
-      const { error: modError } = await db.from("ModuleAssignment").insert(newRows);
-      if (!modError) modulesAdded += newRows.length;
-    }
-  }
-
-  return { pathsAdded, modulesAdded };
+  const { data, error } = await db.rpc("assign_paths_for_position_atomic", {
+    p_user_id: userId,
+    p_assigned_by_id: assignedById,
+  });
+  if (error) throw new Error(error.message);
+  const result = (data || {}) as Record<string, unknown>;
+  return {
+    pathsAdded: asCount(result.pathsAdded),
+    modulesAdded: asCount(result.modulesAdded),
+  };
 }

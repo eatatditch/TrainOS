@@ -99,7 +99,10 @@ export default function SearchPage() {
   const [searched, setSearched] = useState(false);
   const [definitions, setDefinitions] = useState<Definition[]>([]);
   const [expandedDef, setExpandedDef] = useState<string | null>(null);
+  const [searchError, setSearchError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const requestIdRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     fetch("/api/dietary-definitions")
@@ -107,7 +110,11 @@ export default function SearchPage() {
       .then((data) => setDefinitions(Array.isArray(data) ? data : []));
   }, []);
 
+  useEffect(() => () => abortRef.current?.abort(), []);
+
   const doSearch = useCallback(async (q: string) => {
+    const requestId = ++requestIdRef.current;
+    abortRef.current?.abort();
     if (!q.trim()) {
       setResults([]);
       setAnswer(null);
@@ -115,33 +122,47 @@ export default function SearchPage() {
       setFoodItem(null);
       setFoodList(null);
       setAiAnswer(null);
+      setSearchError("");
       setSearched(false);
+      setLoading(false);
       return;
     }
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setResults([]);
+    setAnswer(null);
+    setRecipe(null);
+    setFoodItem(null);
+    setFoodList(null);
+    setAiAnswer(null);
+    setSearchError("");
     setLoading(true);
     setSearched(true);
-    // Always keep the loader visible for at least 5s so the Paloma surfer
-    // gets his moment even when the API responds quickly.
+    // Keep a brief loading transition so results do not visually flicker.
     const start = Date.now();
     try {
-      const res = await fetch(`/api/search/answer?q=${encodeURIComponent(q)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setAnswer(data.answer);
-        setRecipe(data.recipe);
-        setFoodItem(data.foodItem);
-        setFoodList(data.foodList);
-        setAiAnswer(data.aiAnswer);
-        setResults(data.results || []);
-      }
-    } catch {
-      // silent
-    } finally {
+      const res = await fetch(`/api/search/answer?q=${encodeURIComponent(q)}`, {
+        signal: controller.signal,
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "Search failed. Try again.");
       const elapsed = Date.now() - start;
-      if (elapsed < 5000) {
-        await new Promise((r) => setTimeout(r, 5000 - elapsed));
+      if (elapsed < 600) {
+        await new Promise((resolve) => setTimeout(resolve, 600 - elapsed));
       }
-      setLoading(false);
+      if (requestId !== requestIdRef.current) return;
+      setAnswer(data.answer);
+      setRecipe(data.recipe);
+      setFoodItem(data.foodItem);
+      setFoodList(data.foodList);
+      setAiAnswer(data.aiAnswer);
+      setResults(data.results || []);
+    } catch (error) {
+      if (controller.signal.aborted || requestId !== requestIdRef.current) return;
+      setSearchError(error instanceof Error ? error.message : "Search failed. Try again.");
+    } finally {
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }, []);
 
@@ -154,10 +175,12 @@ export default function SearchPage() {
   };
 
   return (
-    <div className="space-y-6 max-w-3xl mx-auto">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900">Search & Knowledge Center</h1>
-        <p className="text-gray-500 mt-1">Type a question, then hit Enter — the search runs on submit, not while you type.</p>
+    <div className="mx-auto max-w-4xl space-y-7 animate-fade-in">
+      <section className="relative overflow-hidden rounded-[2rem] bg-ditch-navy p-6 text-white shadow-[var(--shadow-lift)] sm:p-8 lg:p-10">
+      <div className="relative text-center">
+        <p className="mb-2 text-[10px] font-extrabold uppercase tracking-[0.24em] text-ditch-seafoam">Powered by SpecOS</p>
+        <h1 className="text-3xl font-black tracking-[-0.045em] sm:text-4xl">Ask. Check. Never guess.</h1>
+        <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-white/60">Recipes, standards, menu details, and the right words for the moment—right when you need them.</p>
       </div>
 
       <form
@@ -166,9 +189,10 @@ export default function SearchPage() {
           doSearch(query);
           inputRef.current?.blur();
         }}
-        className="relative"
+        className="relative mt-7"
+        role="search"
       >
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+        <Search className="absolute left-4 top-1/2 size-5 -translate-y-1/2 text-ditch-navy/35" />
         <input
           ref={inputRef}
           type="search"
@@ -176,17 +200,18 @@ export default function SearchPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={`Try "Baja Fish Taco", "What is gluten-free?", or "recipe for a Mojito"...`}
-          className="w-full pl-12 pr-4 py-4 rounded-xl border-2 border-gray-200 focus:border-ditch-orange focus:ring-0 focus:outline-none text-base"
+          className="search-field py-4 pl-12 pr-12 text-base"
           autoFocus
         />
         {loading && (
           <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 animate-spin" />
         )}
       </form>
+      </section>
 
       {!searched && (
         <div>
-          <p className="text-sm font-medium text-gray-500 mb-3">Try searching for:</p>
+          <p className="mb-3 text-[10px] font-extrabold uppercase tracking-[0.16em] text-ditch-navy/45">Try a quick lookup</p>
           <div className="flex flex-wrap gap-2">
             {[
               "Hang 10 Marg",
@@ -205,7 +230,7 @@ export default function SearchPage() {
               <button
                 key={q}
                 onClick={() => runSearch(q)}
-                className="px-3 py-1.5 bg-gray-100 rounded-full text-sm text-gray-600 hover:bg-ditch-orange/10 hover:text-ditch-orange transition-colors"
+                className="rounded-full border border-ditch-navy/10 bg-white px-3.5 py-2 text-xs font-semibold text-ditch-navy/65 shadow-sm transition-all hover:-translate-y-0.5 hover:border-ditch-orange/40 hover:text-ditch-orange"
               >
                 {q}
               </button>
@@ -218,8 +243,14 @@ export default function SearchPage() {
         <SurfingLoader />
       )}
 
+      {searched && !loading && searchError ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800" role="alert">
+          {searchError} No previous result is being shown. Verify urgent allergy questions directly with a manager and the kitchen.
+        </div>
+      ) : null}
+
       {searched && !loading && recipe && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="overflow-hidden rounded-[1.75rem] border border-ditch-navy/10 bg-white shadow-[var(--shadow-lift)]">
           <div className="bg-ditch-navy px-5 py-3">
             <div className="flex items-center justify-between">
               <h2 className="text-white font-bold text-lg">{recipe.name}</h2>
@@ -519,7 +550,7 @@ export default function SearchPage() {
         </div>
       )}
 
-      {searched && !loading && !recipe && !foodItem && !foodList && !aiAnswer && !answer && results.length === 0 && (
+      {searched && !loading && !searchError && !recipe && !foodItem && !foodList && !aiAnswer && !answer && results.length === 0 && (
         <EmptyState
           icon={Search}
           title="No Results Found"

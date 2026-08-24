@@ -1,21 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getUser } from "@/lib/auth";
-
-async function assertAdmin() {
-  const user = await getUser();
-  if (!user || !["SUPER_ADMIN", "ADMIN", "MANAGER"].includes(user.role)) return false;
-  return true;
-}
+import { MANAGER_ROLES, authorizeApi } from "@/lib/api-auth";
 
 export async function GET() {
-  if (!(await assertAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await authorizeApi(MANAGER_ROLES);
+  if (!auth.authorized) return auth.response;
   const { data } = await db.from("Ingredient").select("*").order("name");
   return NextResponse.json(data || []);
 }
 
 export async function POST(request: NextRequest) {
-  if (!(await assertAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await authorizeApi(MANAGER_ROLES);
+  if (!auth.authorized) return auth.response;
   const { id, name, allergens, substitutes, notes } = await request.json();
   if (!id || !name) return NextResponse.json({ error: "id and name required" }, { status: 400 });
 
@@ -33,7 +29,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  if (!(await assertAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await authorizeApi(MANAGER_ROLES);
+  if (!auth.authorized) return auth.response;
   const id = request.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
   await db.from("Ingredient").delete().eq("id", id);

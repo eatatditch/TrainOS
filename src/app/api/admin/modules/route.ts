@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { slugify } from "@/lib/utils";
+import { ADMIN_ROLES, MANAGER_ROLES, authorizeApi } from "@/lib/api-auth";
 
 export async function GET(request: NextRequest) {
+  const auth = await authorizeApi(MANAGER_ROLES);
+  if (!auth.authorized) return auth.response;
+
   const sectionId = request.nextUrl.searchParams.get("sectionId");
 
   let query = db
@@ -14,16 +17,17 @@ export async function GET(request: NextRequest) {
   if (sectionId) {
     query = query.eq("sectionId", sectionId);
   }
+  if (request.nextUrl.searchParams.get("includeInactive") !== "1") {
+    query = query.eq("isActive", true);
+  }
 
   const { data: modules } = await query;
   return NextResponse.json(modules || []);
 }
 
 export async function POST(request: NextRequest) {
-  const user = await getUser();
-  if (!user || !["SUPER_ADMIN", "ADMIN"].includes(user.role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-  }
+  const auth = await authorizeApi(ADMIN_ROLES);
+  if (!auth.authorized) return auth.response;
 
   const data = await request.json();
   const slug = slugify(data.title);

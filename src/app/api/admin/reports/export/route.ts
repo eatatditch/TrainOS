@@ -1,51 +1,53 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getUser } from "@/lib/auth";
+import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { MANAGER_ROLES, authorizeApi } from "@/lib/api-auth";
 
-export async function GET(request: NextRequest) {
-  const user = await getUser();
-  if (!user || !["SUPER_ADMIN", "ADMIN"].includes(user.role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-  }
+const pairKey = (userId: string, moduleId: string) => `${userId}:${moduleId}`;
+const csvCell = (value: unknown) => {
+  let content = String(value ?? "");
+  if (/^[=+\-@\t\r]/.test(content)) content = `'${content}`;
+  return `"${content.replaceAll('"', '""')}"`;
+};
 
-  const { data: users } = await db
-    .from("User")
-    .select("id, email, firstName, lastName, role, location")
-    .eq("isActive", true);
+export async function GET() {
+  const auth = await authorizeApi(MANAGER_ROLES);
+  if (!auth.authorized) return auth.response;
 
-  const rows = await Promise.all(
-    (users || []).map(async (u: any) => {
-      const [{ count: assignmentCount }, { count: completionCount }, { data: quizAttempts }] = await Promise.all([
-        db.from("ModuleAssignment").select("*", { count: "exact", head: true }).eq("userId", u.id),
-        db.from("ModuleCompletion").select("*", { count: "exact", head: true }).eq("userId", u.id),
-        db.from("QuizAttempt").select("score, passed").eq("userId", u.id),
-      ]);
-      const assigned = assignmentCount || 0;
-      const completed = completionCount || 0;
-      const attempts = quizAttempts || [];
-      const avgScore = attempts.length > 0
-        ? Math.round(attempts.reduce((a: number, b: any) => a + b.score, 0) / attempts.length)
-        : 0;
-      return [
-        `${u.firstName} ${u.lastName}`,
-        u.email,
-        u.role,
-        u.location || "",
-        assigned,
-        completed,
-        assigned > 0 ? Math.round((completed / assigned) * 100) : 0,
-        avgScore,
-      ];
-    })
-  );
+  const [usersResult, modulesResult, assignmentsResult, completionsResult, attemptsResult] = await Promise.all([
+    db.from("User").select("id, email, firstName, lastName, role, location").eq("isActive", true),
+    db.from("Module").select("id").eq("isActive", true),
+    db.from("ModuleAssignment").select("userId, moduleId").eq("isActive", true),
+    db.from("ModuleCompletion").select("userId, moduleId"),
+    db.from("QuizAttempt").select("userId, score, quiz:Quiz(moduleId)"),
+  ]);
+  const error = usersResult.error || modulesResult.error || assignmentsResult.error || completionsResult.error || attemptsResult.error;
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  const users = usersResult.data || [];
+  const activeUserIds = new Set(users.map((user: any) => user.id));
+  const activeModuleIds = new Set((modulesResult.data || []).map((trainingModule: any) => trainingModule.id));
+  const assignmentKeys = new Set<string>((assignmentsResult.data || [])
+    .filter((assignment: any) => activeUserIds.has(assignment.userId) && activeModuleIds.has(assignment.moduleId))
+    .map((assignment: any) => pairKey(assignment.userId, assignment.moduleId)));
+  const completionKeys = new Set<string>((completionsResult.data || [])
+    .map((completion: any) => pairKey(completion.userId, completion.moduleId))
+    .filter((key: string) => assignmentKeys.has(key)));
+
+  const rows = users.map((user: any) => {
+    const userAssignmentKeys = Array.from(assignmentKeys).filter((key) => key.startsWith(`${user.id}:`));
+    const completed = userAssignmentKeys.filter((key) => completionKeys.has(key)).length;
+    const attempts = (attemptsResult.data || []).filter((attempt: any) => attempt.userId === user.id && attempt.quiz?.moduleId && activeModuleIds.has(attempt.quiz.moduleId));
+    const avgScore = attempts.length ? Math.round(attempts.reduce((sum: number, attempt: any) => sum + attempt.score, 0) / attempts.length) : 0;
+    return [`${user.firstName} ${user.lastName}`, user.email, user.role, user.location || "", userAssignmentKeys.length, completed, userAssignmentKeys.length ? Math.round((completed / userAssignmentKeys.length) * 100) : 0, avgScore];
+  });
 
   const headers = ["Name", "Email", "Role", "Location", "Assigned", "Completed", "Completion %", "Avg Quiz Score"];
-  const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-
+  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
   return new NextResponse(csv, {
     headers: {
-      "Content-Type": "text/csv",
+      "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": "attachment; filename=ditch-training-report.csv",
+      "X-Content-Type-Options": "nosniff",
     },
   });
 }

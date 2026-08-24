@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
+import { useCallback, useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +40,34 @@ type Tab = "overview" | "employees" | "overdue";
 type SortField = "name" | "role" | "location" | "assigned" | "completed" | "completionPercent";
 type SortDir = "asc" | "desc";
 
+function SortHeader({
+  field,
+  children,
+  activeField,
+  direction,
+  onSort,
+}: {
+  field: SortField;
+  children: React.ReactNode;
+  activeField: SortField;
+  direction: SortDir;
+  onSort: (field: SortField) => void;
+}) {
+  return (
+    <th scope="col" className="pb-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+      <button
+        type="button"
+        className="flex min-h-11 items-center gap-1 rounded-lg px-1 text-left hover:text-ditch-ink"
+        onClick={() => onSort(field)}
+        aria-label={`Sort by ${String(children)}${activeField === field ? `, currently ${direction}ending` : ""}`}
+      >
+        {children}
+        <ArrowUpDown className="size-3" aria-hidden="true" />
+      </button>
+    </th>
+  );
+}
+
 export default function ReportsPage() {
   const [overview, setOverview] = useState<OverviewStats | null>(null);
   const [employeeReport, setEmployeeReport] = useState<EmployeeReport[]>([]);
@@ -49,25 +76,46 @@ export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    fetchData();
+  const fetchData = useCallback(async () => {
+    try {
+      const [overviewRes, empRes, overdueRes] = await Promise.all([
+        fetch("/api/admin/reports?type=overview", { cache: "no-store" }),
+        fetch("/api/admin/reports?type=employees", { cache: "no-store" }),
+        fetch("/api/admin/reports?type=overdue", { cache: "no-store" }),
+      ]);
+      const responses = [overviewRes, empRes, overdueRes];
+      if (responses.some((response) => !response.ok)) {
+        const failed = responses.find((response) => !response.ok);
+        const payload = await failed?.json().catch(() => null);
+        throw new Error(payload?.error || "Reports could not be loaded.");
+      }
+      const [overviewData, empData, overdueData] = await Promise.all(
+        responses.map((response) => response.json()),
+      );
+      if (!Array.isArray(empData) || !Array.isArray(overdueData)) {
+        throw new Error("Reports returned an unexpected response.");
+      }
+      setOverview(overviewData as OverviewStats);
+      setEmployeeReport(empData as EmployeeReport[]);
+      setOverdue(overdueData as OverdueItem[]);
+    } catch (loadError) {
+      setOverview(null);
+      setEmployeeReport([]);
+      setOverdue([]);
+      setError(loadError instanceof Error ? loadError.message : "Reports could not be loaded.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const fetchData = async () => {
-    const [overviewRes, empRes, overdueRes] = await Promise.all([
-      fetch("/api/admin/reports?type=overview"),
-      fetch("/api/admin/reports?type=employees"),
-      fetch("/api/admin/reports?type=overdue"),
-    ]);
-    const overviewData = await overviewRes.json();
-    const empData = await empRes.json();
-    const overdueData = await overdueRes.json();
-    setOverview(overviewData);
-    setEmployeeReport(empData);
-    setOverdue(overdueData);
-    setLoading(false);
-  };
+  useEffect(() => {
+    // State writes in fetchData occur only after the awaited network requests;
+    // this call starts the external synchronization for the initial render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchData();
+  }, [fetchData]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -92,39 +140,43 @@ export default function ReportsPage() {
     { key: "overdue", label: "Overdue" },
   ];
 
-  const SortHeader = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
-    <th
-      className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider pb-3 cursor-pointer select-none"
-      onClick={() => handleSort(field)}
-    >
-      <span className="flex items-center gap-1">
-        {children}
-        <ArrowUpDown className="w-3 h-3" />
-      </span>
-    </th>
-  );
-
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
+      <div className="flex items-center justify-center py-20" role="status" aria-label="Loading reports">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-ditch-orange" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8 animate-fade-in">
+      <div className="shell-card flex flex-col gap-5 p-6 sm:flex-row sm:items-end sm:justify-between sm:p-7">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
-          <p className="text-gray-500 mt-1">Training analytics and employee progress</p>
+          <p className="page-kicker">Team performance</p>
+          <h1 className="page-title">Reports</h1>
+          <p className="page-subtitle">Spot training momentum, overdue work, and coaching opportunities.</p>
         </div>
-        <a href="/api/admin/reports/export" download>
-          <Button className="flex items-center gap-2">
-            <Download className="w-4 h-4" /> Export CSV
-          </Button>
+        <a href="/api/admin/reports/export" download className="btn-primary flex items-center gap-2">
+          <Download className="w-4 h-4" /> Export CSV
         </a>
       </div>
+
+      {error && (
+        <div className="flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-800 sm:flex-row sm:items-center sm:justify-between" role="alert">
+          <span>{error}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              setError("");
+              void fetchData();
+            }}
+            className="btn-outline shrink-0"
+          >
+            Try again
+          </button>
+        </div>
+      )}
 
       {/* Stat Cards */}
       {overview && (
@@ -140,11 +192,16 @@ export default function ReportsPage() {
 
       {/* Tabs */}
       <div className="border-b border-gray-200">
-        <nav className="flex gap-6">
+        <nav className="flex gap-6" role="tablist" aria-label="Report views">
           {tabs.map((tab) => (
             <button
               key={tab.key}
+              type="button"
               onClick={() => setActiveTab(tab.key)}
+              role="tab"
+              id={`report-tab-${tab.key}`}
+              aria-controls={`report-panel-${tab.key}`}
+              aria-selected={activeTab === tab.key}
               className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === tab.key
                   ? "border-ditch-orange text-ditch-orange"
@@ -162,7 +219,7 @@ export default function ReportsPage() {
 
       {/* Tab Content */}
       {activeTab === "overview" && overview && (
-        <Card>
+        <Card role="tabpanel" id="report-panel-overview" aria-labelledby="report-tab-overview">
           <h3 className="font-semibold text-gray-900 mb-4">Training Overview</h3>
           <div className="grid grid-cols-2 gap-6">
             <div>
@@ -190,7 +247,7 @@ export default function ReportsPage() {
       )}
 
       {activeTab === "employees" && (
-        <Card>
+        <Card role="tabpanel" id="report-panel-employees" aria-labelledby="report-tab-employees">
           {employeeReport.length === 0 ? (
             <EmptyState
               icon={Users}
@@ -202,12 +259,12 @@ export default function ReportsPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-gray-100">
-                    <SortHeader field="name">Name</SortHeader>
-                    <SortHeader field="role">Role</SortHeader>
-                    <SortHeader field="location">Location</SortHeader>
-                    <SortHeader field="assigned">Assigned</SortHeader>
-                    <SortHeader field="completed">Completed</SortHeader>
-                    <SortHeader field="completionPercent">Completion %</SortHeader>
+                    <SortHeader field="name" activeField={sortField} direction={sortDir} onSort={handleSort}>Name</SortHeader>
+                    <SortHeader field="role" activeField={sortField} direction={sortDir} onSort={handleSort}>Role</SortHeader>
+                    <SortHeader field="location" activeField={sortField} direction={sortDir} onSort={handleSort}>Location</SortHeader>
+                    <SortHeader field="assigned" activeField={sortField} direction={sortDir} onSort={handleSort}>Assigned</SortHeader>
+                    <SortHeader field="completed" activeField={sortField} direction={sortDir} onSort={handleSort}>Completed</SortHeader>
+                    <SortHeader field="completionPercent" activeField={sortField} direction={sortDir} onSort={handleSort}>Completion %</SortHeader>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -245,7 +302,7 @@ export default function ReportsPage() {
       )}
 
       {activeTab === "overdue" && (
-        <Card>
+        <Card role="tabpanel" id="report-panel-overdue" aria-labelledby="report-tab-overdue">
           {overdue.length === 0 ? (
             <EmptyState
               icon={AlertTriangle}

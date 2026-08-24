@@ -1,31 +1,47 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { isPosition } from "@/lib/positions";
+import { ADMIN_ROLES, MANAGER_ROLES, authorizeApi } from "@/lib/api-auth";
 
 function sanitizePositions(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
   return Array.from(new Set(input.filter(isPosition)));
 }
 
-export async function GET() {
-  const { data: paths } = await db
+export async function GET(request: NextRequest) {
+  const auth = await authorizeApi(MANAGER_ROLES);
+  if (!auth.authorized) return auth.response;
+
+  let pathQuery = db
     .from("TrainingPath")
     .select("*, modules:TrainingPathModule(*, module:Module(*))")
     .order("createdAt", { ascending: false });
+  if (request.nextUrl.searchParams.get("includeInactive") !== "1") pathQuery = pathQuery.eq("isActive", true);
+  const { data: paths, error } = await pathQuery;
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   // Sort modules by sortOrder and add assignment counts
   const pathsWithCounts = await Promise.all(
     (paths || []).map(async (p: any) => {
-      if (p.modules) {
-        p.modules.sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
-      }
+      const modules = (p.modules || [])
+        .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+        .filter((link: any) => link.module)
+        .map((link: any) => ({
+          ...link.module,
+          sortOrder: link.sortOrder ?? 0,
+          isRequired: link.isRequired ?? true,
+        }));
       const { count } = await db
         .from("UserTrainingPath")
         .select("*", { count: "exact", head: true })
-        .eq("trainingPathId", p.id);
+        .eq("trainingPathId", p.id)
+        .eq("isActive", true);
       return {
         ...p,
+        modules,
+        moduleIds: modules.map((module: any) => module.id),
+        assignedCount: count || 0,
         _count: { assignments: count || 0 },
       };
     })
@@ -35,46 +51,23 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const user = await getUser();
-  if (!user || !["SUPER_ADMIN", "ADMIN"].includes(user.role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-  }
+  const auth = await authorizeApi(ADMIN_ROLES);
+  if (!auth.authorized) return auth.response;
 
   const data = await request.json();
+  const title = typeof data.title === "string" ? data.title.trim() : "";
+  const moduleIds: string[] = Array.isArray(data.moduleIds)
+    ? Array.from(new Set(data.moduleIds.filter((id: unknown): id is string => typeof id === "string" && id.length > 0)))
+    : [];
+  if (!title) return NextResponse.json({ error: "Title is required" }, { status: 400 });
 
-  // Create the training path first
-  const { data: path, error: pathError } = await db
-    .from("TrainingPath")
-    .insert({
-      title: data.title,
-      description: data.description || "",
-      targetRole: data.targetRole || "",
-      targetPositions: sanitizePositions(data.targetPositions),
-      isActive: true,
-    })
-    .select()
-    .single();
-
-  if (pathError) return NextResponse.json({ error: pathError.message }, { status: 500 });
-
-  // Create path modules separately
-  if (data.moduleIds && data.moduleIds.length > 0) {
-    const { data: modules } = await db
-      .from("TrainingPathModule")
-      .insert(
-        data.moduleIds.map((moduleId: string, i: number) => ({
-          trainingPathId: path.id,
-          moduleId,
-          sortOrder: i,
-          isRequired: true,
-        }))
-      )
-      .select();
-
-    path.modules = modules || [];
-  } else {
-    path.modules = [];
-  }
-
-  return NextResponse.json(path);
+  const { data: path, error } = await db.rpc("create_training_path_atomic", {
+    p_title: title,
+    p_description: typeof data.description === "string" ? data.description : "",
+    p_target_role: typeof data.targetRole === "string" ? data.targetRole : "",
+    p_target_positions: sanitizePositions(data.targetPositions),
+    p_module_ids: moduleIds,
+  });
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json(path, { status: 201 });
 }

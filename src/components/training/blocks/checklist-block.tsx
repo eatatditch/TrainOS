@@ -12,14 +12,14 @@ export function ChecklistBlock({
   style = "check",
 }: ChecklistBlockProps) {
   return (
-    <div className="my-4">
-      {title && <p className="font-bold text-gray-900 mb-3">{title}</p>}
-      <ul className="space-y-2.5">
+    <div className="my-5">
+      {title && <p className="mb-3 font-extrabold text-ditch-ink">{title}</p>}
+      <ul className="space-y-3">
         {items.map((item, index) => (
-          <li key={index} className="flex items-start gap-2.5 text-sm text-gray-700">
+          <li key={index} className="flex items-start gap-3 text-sm leading-6 text-ditch-navy/75">
             {style === "check" && (
               <Check
-                className="text-ditch-green mt-0.5 shrink-0"
+                className="mt-0.5 shrink-0 rounded-full bg-ditch-seafoam/35 p-0.5 text-ditch-green"
                 size={18}
               />
             )}

@@ -128,11 +128,12 @@ export default function AnnouncementsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8 animate-fade-in">
+      <div className="shell-card flex flex-col gap-5 p-6 sm:flex-row sm:items-end sm:justify-between sm:p-7">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Announcements</h1>
-          <p className="text-gray-500 mt-1">Communicate important updates to your team</p>
+          <p className="page-kicker">Team communication</p>
+          <h1 className="page-title">Team updates</h1>
+          <p className="page-subtitle">Put the right message in front of every shift.</p>
         </div>
         <Button onClick={openNew} className="flex items-center gap-2">
           <Plus className="w-4 h-4" /> Create Announcement

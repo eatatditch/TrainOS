@@ -16,7 +16,7 @@ const config = {
   do: {
     icon: CheckCircle,
     color: "text-green-600",
-    bg: "bg-green-50",
+    bg: "bg-ditch-seafoam/20",
     border: "border-l-green-500",
     defaultTitle: "What Good Looks Like",
   },
@@ -37,7 +37,7 @@ const config = {
   language: {
     icon: MessageSquare,
     color: "text-ditch-navy",
-    bg: "bg-blue-50",
+    bg: "bg-ditch-sky/35",
     border: "border-l-ditch-navy",
     defaultTitle: "Guest-Facing Language",
   },
@@ -51,7 +51,7 @@ const config = {
   remember: {
     icon: Bookmark,
     color: "text-blue-500",
-    bg: "bg-blue-50",
+    bg: "bg-ditch-sky/35",
     border: "border-l-blue-500",
     defaultTitle: "Remember This",
   },
@@ -62,7 +62,7 @@ export function QuickRef({ type, title, items }: QuickRefProps) {
 
   return (
     <div
-      className={`rounded-xl ${bg} border-l-4 ${border} p-5 my-4 shadow-sm`}
+      className={`my-5 rounded-2xl ${bg} border border-ditch-navy/5 border-l-4 ${border} p-5 shadow-sm`}
     >
       <div className="flex items-center gap-2 mb-3">
         <Icon className={`${color} shrink-0`} size={20} />
@@ -72,7 +72,7 @@ export function QuickRef({ type, title, items }: QuickRefProps) {
         {items.map((item, index) => (
           <li
             key={index}
-            className="flex items-start gap-2.5 text-sm text-gray-700"
+            className="flex items-start gap-2.5 text-sm leading-6 text-ditch-navy/75"
           >
             <Icon className={`${color} mt-0.5 shrink-0`} size={14} />
             <span>{item}</span>

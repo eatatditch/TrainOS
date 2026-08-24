@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { ADMIN_ROLES, MANAGER_ROLES, authorizeApi } from "@/lib/api-auth";
 
 export async function GET() {
+  const auth = await authorizeApi(MANAGER_ROLES);
+  if (!auth.authorized) return auth.response;
+
   const { data: announcements } = await db
     .from("Announcement")
     .select("*, createdByUser:User!createdById(firstName, lastName)")
@@ -12,10 +15,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const user = await getUser();
-  if (!user || !["SUPER_ADMIN", "ADMIN"].includes(user.role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-  }
+  const auth = await authorizeApi(ADMIN_ROLES);
+  if (!auth.authorized) return auth.response;
 
   const data = await request.json();
 
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest) {
       content: data.content,
       priority: data.priority || "NORMAL",
       isActive: true,
-      createdById: user.id,
+      createdById: auth.user.id,
       expiresAt: data.expiresAt ? new Date(data.expiresAt).toISOString() : null,
     })
     .select()

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,8 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
-  Plus, Edit2, Trash2, ClipboardCheck, ChevronDown, ChevronUp,
-  X,
+  AlertCircle, Plus, Edit2, Trash2, ClipboardCheck, ChevronDown,
+  ChevronUp, X,
 } from "lucide-react";
 
 interface Question {
@@ -58,6 +58,56 @@ const emptyForm = {
   questions: [{ ...emptyQuestion }] as Question[],
 };
 
+async function readApiError(response: Response, fallback: string) {
+  try {
+    const body: unknown = await response.json();
+    if (
+      typeof body === "object" &&
+      body !== null &&
+      "error" in body &&
+      typeof body.error === "string"
+    ) {
+      return body.error;
+    }
+  } catch {
+    // Use the user-facing fallback when the server did not return JSON.
+  }
+  return fallback;
+}
+
+async function loadQuizBuilderData(): Promise<{
+  quizzes: Quiz[];
+  modules: Module[];
+}> {
+  const [quizRes, modRes] = await Promise.all([
+    fetch("/api/admin/quizzes"),
+    fetch("/api/admin/modules"),
+  ]);
+  if (!quizRes.ok) {
+    throw new Error(await readApiError(quizRes, "Unable to load quizzes"));
+  }
+  if (!modRes.ok) {
+    throw new Error(
+      await readApiError(modRes, "Unable to load training modules"),
+    );
+  }
+
+  const quizData: unknown = await quizRes.json();
+  const modData: unknown = await modRes.json();
+  if (!Array.isArray(quizData) || !Array.isArray(modData)) {
+    throw new Error("The quiz builder received an invalid server response");
+  }
+
+  return {
+    quizzes: quizData as Quiz[],
+    modules: modData as Module[],
+  };
+}
+
+function errorMessage(reason: unknown, fallback: string) {
+  return reason instanceof Error ? reason.message : fallback;
+}
+
 export default function QuizzesPage() {
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [modules, setModules] = useState<Module[]>([]);
@@ -66,26 +116,51 @@ export default function QuizzesPage() {
   const [editing, setEditing] = useState<Quiz | null>(null);
   const [form, setForm] = useState({ ...emptyForm });
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchData();
+  const fetchData = useCallback(async () => {
+    try {
+      const data = await loadQuizBuilderData();
+      setQuizzes(data.quizzes);
+      setModules(data.modules);
+      setError(null);
+    } catch (reason) {
+      setError(errorMessage(reason, "Unable to load the quiz builder"));
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const fetchData = async () => {
-    const [quizRes, modRes] = await Promise.all([
-      fetch("/api/admin/quizzes"),
-      fetch("/api/admin/modules"),
-    ]);
-    const quizData = await quizRes.json();
-    const modData = await modRes.json();
-    setQuizzes(quizData);
-    setModules(modData);
-    setLoading(false);
-  };
+  useEffect(() => {
+    let cancelled = false;
+
+    loadQuizBuilderData()
+      .then((data) => {
+        if (cancelled) return;
+        setQuizzes(data.quizzes);
+        setModules(data.modules);
+        setError(null);
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) {
+          setError(errorMessage(reason, "Unable to load the quiz builder"));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const openNew = () => {
     setEditing(null);
     setForm({ ...emptyForm, questions: [{ ...emptyQuestion }] });
+    setError(null);
     setShowModal(true);
   };
 
@@ -98,31 +173,69 @@ export default function QuizzesPage() {
       passingScore: quiz.passingScore,
       retryLimit: quiz.retryLimit,
       isRequired: quiz.isRequired,
-      questions: quiz.questions.length > 0 ? quiz.questions.map((q) => ({ ...q })) : [{ ...emptyQuestion }],
+      questions: quiz.questions.length > 0
+        ? quiz.questions.map((q) => ({
+            ...q,
+            options: Array.isArray(q.options) ? [...q.options] : [],
+          }))
+        : [{ ...emptyQuestion }],
     });
+    setError(null);
     setShowModal(true);
   };
 
   const handleSave = async () => {
+    if (saving) return;
     const method = editing ? "PUT" : "POST";
     const url = editing ? `/api/admin/quizzes/${editing.id}` : "/api/admin/quizzes";
 
-    await fetch(url, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      if (!response.ok) {
+        setError(
+          await readApiError(
+            response,
+            editing ? "Unable to update quiz" : "Unable to create quiz",
+          ),
+        );
+        return;
+      }
 
-    setShowModal(false);
-    setEditing(null);
-    setForm({ ...emptyForm });
-    fetchData();
+      setShowModal(false);
+      setEditing(null);
+      setForm({ ...emptyForm });
+      await fetchData();
+    } catch {
+      setError("Unable to reach the training server. Your quiz was not saved.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this quiz? This cannot be undone.")) return;
-    await fetch(`/api/admin/quizzes/${id}`, { method: "DELETE" });
-    fetchData();
+    setDeletingId(id);
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/quizzes/${id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        setError(await readApiError(response, "Unable to delete quiz"));
+        return;
+      }
+      await fetchData();
+    } catch {
+      setError("Unable to reach the training server. The quiz was not deleted.");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const updateQuestion = (index: number, updates: Partial<Question>) => {
@@ -181,16 +294,27 @@ export default function QuizzesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8 animate-fade-in">
+      <div className="shell-card flex flex-col gap-5 p-6 sm:flex-row sm:items-end sm:justify-between sm:p-7">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Quiz Builder</h1>
-          <p className="text-gray-500 mt-1">Create and manage quizzes for training modules</p>
+          <p className="page-kicker">Verify the details</p>
+          <h1 className="page-title">Knowledge checks</h1>
+          <p className="page-subtitle">Build focused checks that prove the team can recall what matters.</p>
         </div>
         <Button onClick={openNew} className="flex items-center gap-2">
           <Plus className="w-4 h-4" /> Create Quiz
         </Button>
       </div>
+
+      {error && !showModal && (
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"
+        >
+          <AlertCircle className="mt-0.5 size-5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
 
       {quizzes.length === 0 ? (
         <EmptyState
@@ -231,6 +355,7 @@ export default function QuizzesPage() {
                     onClick={() => setExpandedId(expandedId === quiz.id ? null : quiz.id)}
                     className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                     title="View questions"
+                    aria-label={`${expandedId === quiz.id ? "Hide" : "View"} questions for ${quiz.title}`}
                   >
                     {expandedId === quiz.id ? (
                       <ChevronUp className="w-4 h-4 text-gray-400" />
@@ -241,12 +366,15 @@ export default function QuizzesPage() {
                   <button
                     onClick={() => openEdit(quiz)}
                     className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                    aria-label={`Edit ${quiz.title}`}
                   >
                     <Edit2 className="w-4 h-4 text-gray-400" />
                   </button>
                   <button
                     onClick={() => handleDelete(quiz.id)}
                     className="p-2 hover:bg-red-50 rounded-lg transition-colors"
+                    aria-label={`Delete ${quiz.title}`}
+                    disabled={deletingId === quiz.id}
                   >
                     <Trash2 className="w-4 h-4 text-red-400" />
                   </button>
@@ -301,6 +429,15 @@ export default function QuizzesPage() {
         size="xl"
       >
         <div className="space-y-4">
+          {error && (
+            <div
+              role="alert"
+              className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"
+            >
+              <AlertCircle className="mt-0.5 size-5 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
           <Input
             label="Title"
             value={form.title}
@@ -327,7 +464,7 @@ export default function QuizzesPage() {
               onChange={(e) => setForm({ ...form, passingScore: Number(e.target.value) })}
             />
             <Input
-              label="Retry Limit"
+              label="Attempt Limit (0 = unlimited)"
               type="number"
               value={form.retryLimit}
               onChange={(e) => setForm({ ...form, retryLimit: Number(e.target.value) })}
@@ -364,6 +501,7 @@ export default function QuizzesPage() {
                       type="button"
                       onClick={() => removeQuestion(qIdx)}
                       className="p-1 hover:bg-red-50 rounded transition-colors"
+                      aria-label={`Remove question ${qIdx + 1}`}
                     >
                       <X className="w-4 h-4 text-red-400" />
                     </button>
@@ -410,6 +548,7 @@ export default function QuizzesPage() {
                             type="button"
                             onClick={() => removeOption(qIdx, oIdx)}
                             className="p-1 hover:bg-red-50 rounded transition-colors"
+                            aria-label={`Remove option ${oIdx + 1} from question ${qIdx + 1}`}
                           >
                             <X className="w-4 h-4 text-red-400" />
                           </button>
@@ -443,7 +582,11 @@ export default function QuizzesPage() {
                       label="Correct Answer"
                       value={q.correctAnswer}
                       onChange={(e) => updateQuestion(qIdx, { correctAnswer: e.target.value })}
-                      placeholder="Enter the correct answer"
+                      placeholder={
+                        q.questionType === "SHORT_ANSWER"
+                          ? "Separate accepted answers with |"
+                          : "Enter the correct answer"
+                      }
                     />
                   )}
 
@@ -459,8 +602,16 @@ export default function QuizzesPage() {
           </div>
 
           <div className="flex gap-3 justify-end">
-            <Button variant="ghost" onClick={() => setShowModal(false)}>Cancel</Button>
-            <Button onClick={handleSave}>{editing ? "Update" : "Create"}</Button>
+            <Button
+              variant="ghost"
+              onClick={() => setShowModal(false)}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? "Saving..." : editing ? "Update" : "Create"}
+            </Button>
           </div>
         </div>
       </Modal>

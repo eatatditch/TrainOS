@@ -13,18 +13,18 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       <button
         ref={ref}
         className={cn(
-          "inline-flex items-center justify-center font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none",
+          "inline-flex min-h-10 items-center justify-center gap-2 rounded-xl font-bold shadow-sm transition-all disabled:pointer-events-none disabled:opacity-50",
           {
-            "bg-ditch-orange text-white hover:bg-ditch-orange/90 focus:ring-ditch-orange/50": variant === "primary",
-            "bg-ditch-navy text-white hover:bg-ditch-navy/90 focus:ring-ditch-navy/50": variant === "secondary",
-            "border-2 border-ditch-navy text-ditch-navy hover:bg-ditch-navy hover:text-white focus:ring-ditch-navy/50": variant === "outline",
-            "text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:ring-gray-200": variant === "ghost",
-            "bg-red-600 text-white hover:bg-red-700 focus:ring-red-500/50": variant === "danger",
+            "bg-ditch-orange text-white hover:-translate-y-0.5 hover:brightness-95 hover:shadow-md": variant === "primary",
+            "bg-ditch-navy text-white hover:-translate-y-0.5 hover:bg-ditch-ink hover:shadow-md": variant === "secondary",
+            "border border-ditch-navy/25 bg-white text-ditch-navy hover:-translate-y-0.5 hover:border-ditch-navy hover:bg-ditch-navy hover:text-white": variant === "outline",
+            "bg-transparent text-ditch-navy/70 shadow-none hover:bg-ditch-navy/[0.06] hover:text-ditch-ink": variant === "ghost",
+            "bg-red-600 text-white hover:-translate-y-0.5 hover:bg-red-700 hover:shadow-md": variant === "danger",
           },
           {
-            "px-3 py-1.5 text-sm": size === "sm",
+            "px-3.5 py-2 text-xs": size === "sm",
             "px-5 py-2.5 text-sm": size === "md",
-            "px-6 py-3 text-base": size === "lg",
+            "min-h-12 px-6 py-3 text-base": size === "lg",
           },
           className
         )}

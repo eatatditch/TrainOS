@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, Clock } from "lucide-react";
@@ -9,80 +9,69 @@ const REQUIRED_SECONDS = 300; // 5 minutes
 
 interface MarkCompleteButtonProps {
   moduleId: string;
+  reviewToken: string;
+  /** Unix timestamp in seconds, signed into reviewToken by the server. */
+  eligibleAt: number;
   /** When true, the 5-minute review timer is skipped for this user. */
   skipReviewTimer?: boolean;
+  completionLabel?: string;
 }
 
-export function MarkCompleteButton({ moduleId, skipReviewTimer = false }: MarkCompleteButtonProps) {
+export function MarkCompleteButton({
+  moduleId,
+  reviewToken,
+  eligibleAt,
+  skipReviewTimer = false,
+  completionLabel = "Mark as complete",
+}: MarkCompleteButtonProps) {
   const [loading, setLoading] = useState(false);
-  const [secondsOnPage, setSecondsOnPage] = useState(0);
-  const [unlocked, setUnlocked] = useState(skipReviewTimer);
-  const activeRef = useRef(true);
-  const tickRef = useRef<NodeJS.Timeout | null>(null);
+  const [remaining, setRemaining] = useState(
+    skipReviewTimer ? 0 : REQUIRED_SECONDS,
+  );
+  const [error, setError] = useState("");
   const router = useRouter();
 
   useEffect(() => {
-    // Admin override — no timer, unlocked immediately.
-    if (skipReviewTimer) {
-      setUnlocked(true);
-      return;
-    }
+    if (skipReviewTimer) return;
 
-    // Load accumulated time for this module from localStorage
-    const storageKey = `module-active-time-${moduleId}`;
-    const stored = parseInt(localStorage.getItem(storageKey) || "0");
-    setSecondsOnPage(stored);
-    if (stored >= REQUIRED_SECONDS) {
-      setUnlocked(true);
-      return;
-    }
-
-    // Track visibility — pause when tab is hidden or user navigates away
-    const handleVisibility = () => {
-      activeRef.current = document.visibilityState === "visible";
+    const updateRemaining = () => {
+      const now = Math.floor(Date.now() / 1_000);
+      setRemaining(Math.max(0, eligibleAt - now));
     };
-    document.addEventListener("visibilitychange", handleVisibility);
-
-    // Tick every second, but only count if page is active/visible
-    let accumulated = stored;
-    tickRef.current = setInterval(() => {
-      if (!activeRef.current) return;
-      accumulated += 1;
-      setSecondsOnPage(accumulated);
-      localStorage.setItem(storageKey, accumulated.toString());
-      if (accumulated >= REQUIRED_SECONDS) {
-        setUnlocked(true);
-        if (tickRef.current) clearInterval(tickRef.current);
-      }
-    }, 1000);
+    const firstUpdate = window.setTimeout(updateRemaining, 0);
+    const interval = window.setInterval(updateRemaining, 1_000);
 
     return () => {
-      if (tickRef.current) clearInterval(tickRef.current);
-      document.removeEventListener("visibilitychange", handleVisibility);
+      window.clearTimeout(firstUpdate);
+      window.clearInterval(interval);
     };
-  }, [moduleId, skipReviewTimer]);
+  }, [eligibleAt, skipReviewTimer]);
+
+  const unlocked = remaining === 0;
 
   const handleComplete = async () => {
     if (!unlocked) return;
     setLoading(true);
+    setError("");
     try {
       const res = await fetch("/api/modules/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ moduleId }),
+        body: JSON.stringify({ moduleId, reviewToken }),
       });
       if (res.ok) {
-        localStorage.removeItem(`module-active-time-${moduleId}`);
         router.refresh();
+      } else {
+        const data = await res.json().catch(() => null);
+        setError(data?.error || "We could not save this completion. Try again.");
       }
     } catch {
-      // silently fail
+      setError("You appear to be offline. Reconnect and try again.");
     } finally {
       setLoading(false);
     }
   };
 
-  const remaining = Math.max(0, REQUIRED_SECONDS - secondsOnPage);
   const minutes = Math.floor(remaining / 60);
   const seconds = remaining % 60;
 
@@ -95,7 +84,7 @@ export function MarkCompleteButton({ moduleId, skipReviewTimer = false }: MarkCo
         </div>
         <Button disabled size="lg" className="flex items-center gap-2 opacity-50 cursor-not-allowed">
           <CheckCircle2 className="w-5 h-5" />
-          Mark as Complete
+          {completionLabel}
         </Button>
         <p className="text-xs text-gray-400">Please review this module for at least 5 minutes</p>
       </div>
@@ -103,9 +92,12 @@ export function MarkCompleteButton({ moduleId, skipReviewTimer = false }: MarkCo
   }
 
   return (
-    <Button onClick={handleComplete} disabled={loading} size="lg" className="flex items-center gap-2">
-      <CheckCircle2 className="w-5 h-5" />
-      {loading ? "Marking Complete..." : "Mark as Complete"}
-    </Button>
+    <div className="flex flex-col items-end gap-2">
+      <Button onClick={handleComplete} disabled={loading} size="lg" className="flex items-center gap-2">
+        <CheckCircle2 className="w-5 h-5" />
+        {loading ? "Saving…" : completionLabel}
+      </Button>
+      {error ? <p className="max-w-sm text-right text-sm font-medium text-red-700" role="alert">{error}</p> : null}
+    </div>
   );
 }

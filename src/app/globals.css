@@ -1,17 +1,71 @@
 @import "tailwindcss";
 
 @theme {
-  --color-ditch-orange: #cd6028;
-  --color-ditch-green: #547352;
-  --color-ditch-navy: #325269;
+  /* Dark enough for AA-compliant white text on buttons and status chips. */
+  --color-ditch-orange: #b94717;
+  --color-ditch-green: #4f7167;
+  --color-ditch-navy: #143b4b;
+  --color-ditch-seafoam: #a8d5ca;
+  --color-ditch-sand: #f1e4ce;
+  --color-ditch-cream: #fbf8f1;
+  --color-ditch-ink: #14272f;
+  --color-ditch-sky: #dcecef;
   --color-ditch-white: #ffffff;
   --color-ditch-black: #000000;
-  --font-sans: "Inter", system-ui, sans-serif;
+  --font-sans: "Avenir Next", "Segoe UI", Helvetica, Arial, system-ui, sans-serif;
 }
 
 @layer base {
+  :root {
+    --shadow-surf: 0 1px 1px rgb(20 39 47 / 0.04), 0 12px 32px rgb(20 59 75 / 0.08);
+    --shadow-lift: 0 2px 2px rgb(20 39 47 / 0.04), 0 18px 48px rgb(20 59 75 / 0.14);
+  }
+
+  * {
+    border-color: rgb(20 59 75 / 0.12);
+  }
+
+  html {
+    background: var(--color-ditch-cream);
+    scroll-behavior: smooth;
+  }
+
   body {
-    @apply bg-gray-50 text-gray-900 antialiased;
+    @apply bg-ditch-cream text-ditch-ink antialiased;
+    min-width: 320px;
+  }
+
+  ::selection {
+    background: rgb(216 95 42 / 0.22);
+    color: var(--color-ditch-ink);
+  }
+
+  :focus-visible {
+    outline: 3px solid var(--color-ditch-orange);
+    outline-offset: 3px;
+  }
+
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button,
+  a {
+    touch-action: manipulation;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
   }
 
   @media print {
@@ -29,13 +83,178 @@
 
 @layer components {
   .btn-primary {
-    @apply bg-ditch-orange text-white px-6 py-2.5 rounded-lg font-medium hover:bg-ditch-orange/90 transition-colors focus:outline-none focus:ring-2 focus:ring-ditch-orange/50;
+    @apply inline-flex min-h-11 items-center justify-center rounded-xl bg-ditch-orange px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:brightness-95 hover:shadow-md;
   }
   .btn-secondary {
-    @apply bg-ditch-navy text-white px-6 py-2.5 rounded-lg font-medium hover:bg-ditch-navy/90 transition-colors focus:outline-none focus:ring-2 focus:ring-ditch-navy/50;
+    @apply inline-flex min-h-11 items-center justify-center rounded-xl bg-ditch-navy px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-ditch-ink hover:shadow-md focus:outline-none;
   }
   .btn-outline {
-    @apply border-2 border-ditch-navy text-ditch-navy px-6 py-2.5 rounded-lg font-medium hover:bg-ditch-navy hover:text-white transition-colors;
+    @apply inline-flex min-h-11 items-center justify-center rounded-xl border border-ditch-navy/25 bg-white px-5 py-2.5 text-sm font-bold text-ditch-navy transition-all hover:-translate-y-0.5 hover:border-ditch-navy hover:bg-ditch-navy hover:text-white;
+  }
+
+  .app-canvas {
+    position: relative;
+    isolation: isolate;
+    background:
+      radial-gradient(circle at 88% 4%, rgb(168 213 202 / 0.32), transparent 24rem),
+      radial-gradient(circle at 8% 80%, rgb(241 228 206 / 0.72), transparent 30rem),
+      var(--color-ditch-cream);
+  }
+
+  .app-canvas::before {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    content: "";
+    opacity: 0.23;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='44' viewBox='0 0 44 44'%3E%3Cpath d='M0 43.5h44' stroke='%23143b4b' stroke-opacity='.08'/%3E%3C/svg%3E");
+  }
+
+  .page-kicker {
+    @apply mb-2 text-[11px] font-extrabold uppercase tracking-[0.22em] text-ditch-orange;
+  }
+
+  .page-title {
+    @apply text-[2rem] font-black tracking-[-0.045em] text-ditch-ink sm:text-[2.45rem];
+    line-height: 1.02;
+  }
+
+  .page-subtitle {
+    @apply mt-2 max-w-2xl text-sm leading-6 text-ditch-navy/65 sm:text-base;
+  }
+
+  .shell-card {
+    @apply rounded-2xl border border-ditch-navy/10 bg-white/90;
+    box-shadow: var(--shadow-surf);
+  }
+
+  .surf-rule {
+    height: 3px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--color-ditch-orange) 0 20%, var(--color-ditch-sand) 20% 40%, var(--color-ditch-seafoam) 40% 66%, var(--color-ditch-navy) 66% 100%);
+  }
+
+  .data-table {
+    @apply overflow-hidden rounded-2xl border border-ditch-navy/10 bg-white;
+    box-shadow: var(--shadow-surf);
+  }
+
+  .data-table thead {
+    @apply bg-ditch-navy/[0.04] text-ditch-navy/65;
+  }
+
+  .data-table tbody tr {
+    @apply border-ditch-navy/10 transition-colors hover:bg-ditch-sand/20;
+  }
+
+  .field-label {
+    @apply text-xs font-bold uppercase tracking-[0.12em] text-ditch-navy/70;
+  }
+
+  .search-field {
+    @apply w-full rounded-2xl border border-ditch-navy/15 bg-white text-ditch-ink shadow-[0_10px_32px_rgba(20,59,75,0.07)] outline-none transition-all placeholder:text-ditch-navy/35 focus:border-ditch-orange focus:shadow-[0_12px_36px_rgba(216,95,42,0.12)];
+  }
+
+  .curriculum-module {
+    @apply space-y-6 text-[0.98rem] leading-7 text-ditch-ink;
+  }
+
+  .curriculum-module > header {
+    @apply overflow-hidden rounded-2xl border border-ditch-navy/10 bg-white p-6 sm:p-8;
+    box-shadow: var(--shadow-surf);
+  }
+
+  .curriculum-module > header h1 {
+    @apply mt-2 text-2xl font-black tracking-[-0.035em] text-ditch-ink sm:text-3xl;
+  }
+
+  .curriculum-module > header > p:last-child {
+    @apply mt-3 max-w-3xl text-base leading-7 text-ditch-navy/70;
+  }
+
+  .curriculum-eyebrow {
+    @apply text-[10px] font-extrabold uppercase tracking-[0.2em] text-ditch-orange;
+  }
+
+  .curriculum-block {
+    @apply rounded-2xl border border-ditch-navy/10 bg-white p-5 sm:p-7;
+    box-shadow: var(--shadow-surf);
+  }
+
+  .curriculum-block h2 {
+    @apply mb-3 text-xl font-black tracking-[-0.025em] text-ditch-navy;
+  }
+
+  .curriculum-block h3 {
+    @apply mb-2 mt-5 text-sm font-extrabold uppercase tracking-[0.11em] text-ditch-navy/75;
+  }
+
+  .curriculum-block p + p,
+  .curriculum-block p + ul,
+  .curriculum-block p + ol {
+    @apply mt-3;
+  }
+
+  .curriculum-block ul,
+  .curriculum-block ol {
+    @apply ml-5 space-y-2;
+  }
+
+  .curriculum-block ul { list-style: disc; }
+  .curriculum-block ol { list-style: decimal; }
+
+  .curriculum-block li::marker {
+    color: var(--color-ditch-orange);
+    font-weight: 800;
+  }
+
+  .curriculum-principle,
+  .curriculum-standard,
+  .curriculum-callout {
+    @apply border-l-4 border-l-ditch-orange bg-ditch-sand/25;
+  }
+
+  .curriculum-warning,
+  .curriculum-status-verification-required {
+    @apply border-l-4 border-l-amber-600 bg-amber-50;
+  }
+
+  .curriculum-outcomes {
+    @apply border-ditch-seafoam/80 bg-ditch-seafoam/20;
+  }
+
+  .curriculum-script blockquote {
+    @apply mt-4 rounded-xl border-l-4 border-ditch-orange bg-ditch-cream px-5 py-4 font-semibold text-ditch-navy;
+  }
+
+  .curriculum-table-wrap {
+    @apply mt-4 overflow-x-auto rounded-xl border border-ditch-navy/10;
+  }
+
+  .curriculum-table-wrap table {
+    @apply w-full min-w-[34rem] border-collapse text-left text-sm;
+  }
+
+  .curriculum-table-wrap th {
+    @apply bg-ditch-navy px-4 py-3 font-extrabold text-white;
+  }
+
+  .curriculum-table-wrap td {
+    @apply border-t border-ditch-navy/10 px-4 py-3 align-top;
+  }
+
+  .curriculum-menu-reference > ul > li {
+    @apply my-3 rounded-xl border border-ditch-navy/10 bg-ditch-cream p-4;
+    list-style: none;
+  }
+
+  .curriculum-menu-reference > ul {
+    @apply ml-0;
+  }
+
+  .curriculum-module > footer {
+    @apply rounded-xl bg-ditch-navy/[0.05] px-5 py-3 text-xs leading-5 text-ditch-navy/60;
   }
 }
 
@@ -45,7 +264,17 @@
 }
 
 .animate-fade-in {
-  animation: fade-in 0.3s ease-out;
+  animation: fade-in 0.35s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .surfer-track {

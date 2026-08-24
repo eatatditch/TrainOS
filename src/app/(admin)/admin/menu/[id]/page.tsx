@@ -18,7 +18,7 @@ const DIETARY_OPTIONS = [
   "dairy-free-friendly",
   "pescatarian",
 ];
-const CATEGORIES = ["Starters", "Tacos", "Bowls", "Platos", "Handhelds", "Dessert", "Sides", "Kids"];
+const CATEGORIES = ["Share + Socialize", "Soup + Salads", "Tacos", "Sides", "Bowls", "Platos", "Handhelds", "Dessert"];
 
 interface Ingredient {
   id: string;
@@ -65,18 +65,27 @@ export default function MenuItemEditorPage() {
   const [ingredientLibrary, setIngredientLibrary] = useState<Ingredient[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    const loadIngredients = fetch("/api/admin/ingredients").then((r) => r.json());
+    const loadIngredients = fetch("/api/admin/ingredients").then(async (response) => {
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || "Could not load ingredients");
+      return data;
+    });
     if (isNew) {
       loadIngredients.then((data) => {
         setIngredientLibrary(Array.isArray(data) ? data : []);
         setForm({ ...empty, id: `food-${Date.now()}` });
         setLoading(false);
-      });
+      }).catch((loadError) => { setError(loadError instanceof Error ? loadError.message : "Could not load menu editor"); setLoading(false); });
     } else {
       Promise.all([
-        fetch(`/api/admin/menu?id=${encodeURIComponent(params.id)}`).then((r) => r.json()),
+        fetch(`/api/admin/menu?id=${encodeURIComponent(params.id)}`).then(async (response) => {
+          const data = await response.json().catch(() => null);
+          if (!response.ok) throw new Error(data?.error || "Could not load menu item");
+          return data;
+        }),
         loadIngredients,
       ]).then(([item, ings]) => {
         if (item && !item.error) {
@@ -97,7 +106,7 @@ export default function MenuItemEditorPage() {
         }
         setIngredientLibrary(Array.isArray(ings) ? ings : []);
         setLoading(false);
-      });
+      }).catch((loadError) => { setError(loadError instanceof Error ? loadError.message : "Could not load menu editor"); setLoading(false); });
     }
   }, [params.id, isNew]);
 
@@ -120,19 +129,26 @@ export default function MenuItemEditorPage() {
   const save = async () => {
     if (!form.title) return;
     setSaving(true);
+    setError("");
     const method = isNew ? "POST" : "PUT";
-    await fetch("/api/admin/menu", {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    setSaving(false);
-    router.push("/admin/menu");
+    try {
+      const response = await fetch("/api/admin/menu", { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || "Could not save menu item");
+      router.push("/admin/menu");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save menu item");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const remove = async () => {
-    if (!confirm(`Delete "${form.title}" from the menu?`)) return;
-    await fetch(`/api/admin/menu?id=${encodeURIComponent(form.id)}`, { method: "DELETE" });
+    if (!confirm(`Archive "${form.title}" from the live menu? Its history will be preserved.`)) return;
+    setError("");
+    const response = await fetch(`/api/admin/menu?id=${encodeURIComponent(form.id)}`, { method: "DELETE" });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) { setError(data?.error || "Could not archive menu item"); return; }
     router.push("/admin/menu");
   };
 
@@ -146,6 +162,7 @@ export default function MenuItemEditorPage() {
 
   return (
     <div className="space-y-6 max-w-3xl">
+      {error && <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-800">{error}</div>}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Link href="/admin/menu" className="p-2 hover:bg-gray-100 rounded-lg">
@@ -162,7 +179,7 @@ export default function MenuItemEditorPage() {
           <button
             onClick={remove}
             className="p-2 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg"
-            title="Delete"
+            title="Archive"
           >
             <Trash2 className="w-5 h-5" />
           </button>
@@ -316,7 +333,7 @@ export default function MenuItemEditorPage() {
           onChange={(e) => setForm({ ...form, modifications: e.target.value })}
           rows={3}
           className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:border-ditch-orange focus:ring-0 focus:outline-none"
-          placeholder="Request on corn tortilla for gluten-free. Shares fryer with gluten items."
+          placeholder="Document approved modifications and required manager/kitchen verification. Never infer allergen safety."
         />
       </Card>
 

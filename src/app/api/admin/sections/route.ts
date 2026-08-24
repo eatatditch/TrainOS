@@ -1,18 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { slugify } from "@/lib/utils";
+import { ADMIN_ROLES, MANAGER_ROLES, authorizeApi } from "@/lib/api-auth";
 
-export async function GET() {
-  const { data: sections } = await db
+export async function GET(request: NextRequest) {
+  const auth = await authorizeApi(MANAGER_ROLES);
+  if (!auth.authorized) return auth.response;
+
+  let query = db
     .from("Section")
     .select("*, modules:Module(*)")
     .order("sortOrder");
+  if (request.nextUrl.searchParams.get("includeInactive") !== "1") {
+    query = query.eq("isActive", true);
+  }
+  const { data: sections } = await query;
 
   // Sort modules within each section
   for (const section of sections || []) {
     if (section.modules) {
-      section.modules.sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+      section.modules = section.modules
+        .filter((trainingModule: any) => request.nextUrl.searchParams.get("includeInactive") === "1" || trainingModule.isActive)
+        .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
     }
   }
 
@@ -20,10 +29,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const user = await getUser();
-  if (!user || !["SUPER_ADMIN", "ADMIN"].includes(user.role)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-  }
+  const auth = await authorizeApi(ADMIN_ROLES);
+  if (!auth.authorized) return auth.response;
 
   const data = await request.json();
   const slug = slugify(data.title);

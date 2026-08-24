@@ -1,16 +1,22 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { db } from "./db";
+import { companyFactsPrompt } from "./company-facts";
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || "",
+  timeout: 15_000,
+  maxRetries: 1,
 });
 
 const MODEL = "claude-haiku-4-5-20251001";
 
-async function buildMenuContext(): Promise<string> {
-  const [foodRes, recipeRes, configRes, ingRes, linkRes, defRes] = await Promise.all([
+async function buildMenuContext(
+  accessibleModuleIds: ReadonlySet<string> | null,
+): Promise<string> {
+  const [foodRes, recipeRes, menuInfoRes, configRes, ingRes, linkRes, defRes] = await Promise.all([
     db.from("SearchIndex").select("id, title, content, tags").eq("contentType", "food"),
-    db.from("SearchIndex").select("title, content, tags").eq("contentType", "recipe"),
+    db.from("SearchIndex").select("moduleId, title, content, tags").eq("contentType", "recipe"),
+    db.from("SearchIndex").select("title, content, tags").eq("contentType", "menu-info"),
     db.from("KitchenConfig").select("key, value, label, notes").then(
       (r) => r,
       () => ({ data: [] as any[] })
@@ -64,20 +70,6 @@ async function buildMenuContext(): Promise<string> {
   }
 
   const ingredients = (ingRes as any).data || [];
-  if (ingredients.length > 0) {
-    sections.push(
-      "# INGREDIENT LIBRARY (allergens flow from these to any linked dish)\n\n" +
-        ingredients
-          .map(
-            (i: any) =>
-              `- ${i.name}: contains [${(i.allergens || []).join(", ") || "none"}]${
-                i.substitutes?.length ? `, substitutes: [${i.substitutes.join(", ")}]` : ""
-              }${i.notes ? ` — ${i.notes}` : ""}`
-          )
-          .join("\n")
-    );
-  }
-
   const links = (linkRes as any).data || [];
   const ingredientsByFoodId: Record<string, string[]> = {};
   const ingredientById: Record<string, any> = {};
@@ -87,6 +79,26 @@ async function buildMenuContext(): Promise<string> {
     if (!name) continue;
     if (!ingredientsByFoodId[link.foodItemId]) ingredientsByFoodId[link.foodItemId] = [];
     ingredientsByFoodId[link.foodItemId].push(name);
+  }
+
+  const linkedIngredientIds = new Set(
+    links.map((link: any) => link.ingredientId).filter(Boolean),
+  );
+  const linkedIngredients = ingredients.filter((ingredient: any) =>
+    linkedIngredientIds.has(ingredient.id),
+  );
+  if (linkedIngredients.length > 0) {
+    sections.push(
+      "# CURRENTLY LINKED INGREDIENT RECORDS (still require manager + kitchen verification)\n\n" +
+        linkedIngredients
+          .map(
+            (ingredient: any) =>
+              `- ${ingredient.name}: recorded flags [${(ingredient.allergens || []).join(", ") || "none recorded"}]${
+                ingredient.substitutes?.length ? `, substitutes: [${ingredient.substitutes.join(", ")}]` : ""
+              }${ingredient.notes ? ` — ${ingredient.notes}` : ""}`,
+          )
+          .join("\n"),
+    );
   }
 
   if (foodRes.data && foodRes.data.length > 0) {
@@ -103,14 +115,29 @@ async function buildMenuContext(): Promise<string> {
     );
   }
 
-  if (recipeRes.data && recipeRes.data.length > 0) {
+  const authorizedRecipes = (recipeRes.data || []).filter(
+    (recipe) =>
+      Boolean(recipe.moduleId) &&
+      (accessibleModuleIds === null ||
+        accessibleModuleIds.has(recipe.moduleId as string)),
+  );
+  if (authorizedRecipes.length > 0) {
     sections.push(
       "# COCKTAIL RECIPES\n\n" +
-        recipeRes.data
+        authorizedRecipes
           .map(
             (r: any) =>
               `## ${r.title}\n${r.content}\nTags: ${(r.tags || []).join(", ")}`
           )
+          .join("\n\n---\n\n")
+    );
+  }
+
+  if (menuInfoRes.data && menuInfoRes.data.length > 0) {
+    sections.push(
+      "# CURRENT PRINTED OFFERS & BEVERAGE SNAPSHOTS\n\n" +
+        menuInfoRes.data
+          .map((item: any) => `## ${item.title}\n${item.content}\nTags: ${(item.tags || []).join(", ")}`)
           .join("\n\n---\n\n")
     );
   }
@@ -121,28 +148,9 @@ async function buildMenuContext(): Promise<string> {
 const SYSTEM_PROMPT = `You are SpecOS, an instant-answer assistant for Ditch restaurant staff during service. They are mid-shift and need fast, accurate answers.
 
 COMPANY KNOWLEDGE — DITCH:
-- Full name: Ditch (also known as "The Ditch", "Ditch Dining", "Ditch Kitchen & Surf Bar")
-- Owner: Tracy Smith (sole owner — if anyone asks "who owns Ditch", the ONLY answer is Tracy Smith)
-- Total locations: 2 (Bay Shore and Port Jefferson)
+${companyFactsPrompt()}
 
-LOCATIONS:
-- Ditch Bay Shore (the original flagship)
-  - Address: 25 Bayview Ave, Bay Shore, NY 11706
-  - Phone: (631) 206-0420
-  - Opened: 2023
-- Ditch Port Jefferson (second location)
-  - Address: 140 Main St, Port Jefferson, NY 11777
-  - Phone: (631) 206-0420
-  - Opened: 2025
-- If someone asks for "the Bay Shore address/phone" or "Port Jefferson address/phone" — match by town name and return the full info for that location.
-- If someone asks generically "what's the address" without a town, list BOTH with their town labels.
-
-KEY CONTACTS & EMAILS:
-- Catering inquiries: catering@eatatditch.com
-- Catering manager: Alex (She/Her) — refer catering requests to her
-- General inquiries (donations, press, media, partnerships, vendors): info@eatatditch.com
-- Tracy Smith (owner): tracy@eatatditch.com
-- Website: eatatditch.com
+INTERNAL TOOLS:
 - Training platform: training.eatatditch.com (TrainOS — internal, for staff)
 - Staff operations tool: specos.eatatditch.com (SpecOS — internal, for staff mid-shift lookups)
 
@@ -155,20 +163,20 @@ WHAT YOU CAN ANSWER:
 - Anything about the Ditch menu, cocktails, beer, wine, non-alcoholic beverages, ingredients, prep, and procedures (use the provided CONTEXT below for specifics).
 - Questions about Ditch as a company: ownership, locations, opening dates, concept, history. Use the COMPANY KNOWLEDGE above.
 - General hospitality and restaurant knowledge (cocktail technique, wine styles, pairings, service standards, beer categories, brewing basics, spirit categories).
-- General medical, dietary, and allergy knowledge that helps staff understand guest needs: what a condition is (celiac, Crohn's disease, IBS, IBD, diabetes, lactose intolerance, histamine intolerance, gout, kidney disease, GERD, heart disease, hypertension, pregnancy considerations, low-FODMAP, keto, paleo, etc.), what triggers or worsens it, what foods are generally advisable or to avoid.
-- When a guest has a condition or restriction, use your general knowledge to identify which specific Ditch menu items in the CONTEXT below would be best, worst, or modifiable to fit their needs.
+- High-level definitions of common dietary terms. Do not diagnose, give medical advice, or select a dish for a medical condition.
+- You may identify possible menu candidates only when the controlled context explicitly supports them. Every candidate still requires a manager and kitchen verification before the team makes a guest-facing promise.
 
 HARD RULES:
 1. NEVER invent Ditch menu items, prices, ingredients, or kitchen procedures. Those must come from the CONTEXT below.
-2. When recommending dishes for a condition, only name dishes that actually exist in the FOOD MENU context. Cross-reference their allergens/dietary tags/cross-warnings.
-3. Use the DIETARY TERM DEFINITIONS verbatim — "gluten-friendly" is NOT safe for celiac. Do not soften it.
-4. ALWAYS apply KITCHEN CONFIG cross-contamination rules (shared fryer, shared grill, etc.) when recommending or assessing an item.
-5. For allergy/medical questions touching guest safety, end the answer with: "Confirm with the kitchen before serving." and note "This is general info — guests with serious conditions should consult their doctor."
+2. The context can be incomplete or awaiting verification. Never infer that an item is free of an allergen because a tag, ingredient link, or warning is absent.
+3. Use the DIETARY TERM DEFINITIONS exactly. "Gluten-friendly" and "gluten-free" are different; neither is a celiac clearance unless the current approved allergy procedure explicitly says so.
+4. ALWAYS apply known KITCHEN CONFIG cross-contact warnings, but never treat the absence of a configured warning as proof of safety.
+5. For every allergy, celiac, dietary-restriction, pregnancy, or medical query: use verdict "warning"; never say "safe," "does not contain," or "allergen-free"; do not promise a modification; and end with: "Manager and kitchen verification is required before serving."
 6. Be concise. Staff are busy. 2-4 sentences max unless listing items. No fluff.
 7. If you genuinely don't know something (not menu-related and outside basic restaurant/medical knowledge), say so — don't fabricate.
 
 VERDICT GUIDANCE:
-- "safe" → recommended item(s) clearly work
+- "safe" → only a benign, non-food-safety workflow confirmation; NEVER use for allergy, dietary, celiac, pregnancy, or medical questions
 - "warning" → caution needed (allergens, cross-contamination, condition-specific avoidance)
 - "info" → general informational answer (e.g. "what is celiac disease")
 
@@ -191,16 +199,48 @@ export interface LLMAnswer {
   items?: string[];
 }
 
-export async function askLLM(query: string): Promise<LLMAnswer | null> {
+const SAFETY_QUERY =
+  /\b(allerg(?:y|ic|en)|celiac|gluten|dairy|lactose|shellfish|shrimp|lobster|crab|nuts?|peanut|sesame|soy|egg|vegan|vegetarian|pescatarian|pregnan|medical|condition|disease|syndrome|intoleran|crohn|colitis|ibs|ibd|diabet(?:es|ic)|kidney|renal|gerd|reflux|hypertension|blood pressure|gout|fodmap|histamine|autoimmune|cross[- ]?contact|cross[- ]?contamin)/i;
+
+function validateAnswer(query: string, value: unknown): LLMAnswer | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<LLMAnswer>;
+  if (
+    !["safe", "warning", "info"].includes(candidate.verdict ?? "") ||
+    typeof candidate.title !== "string" ||
+    typeof candidate.answer !== "string"
+  ) {
+    return null;
+  }
+
+  const items = Array.isArray(candidate.items)
+    ? candidate.items.filter((item): item is string => typeof item === "string").slice(0, 12)
+    : [];
+  const isSafetyQuery = SAFETY_QUERY.test(query);
+
+  return {
+    verdict: isSafetyQuery ? "warning" : candidate.verdict!,
+    title: (isSafetyQuery ? "Manager + kitchen verification required" : candidate.title).slice(0, 80),
+    answer: isSafetyQuery
+      ? `${candidate.answer.replace(/\b(?:is|are) safe\b/gi, "may be a possible candidate").replace(/\bdoes not contain\b/gi, "is not currently flagged for").replace(/\ballergen[- ]free\b/gi, "allergen status unverified")} Manager and kitchen verification is required before serving.`.slice(0, 1_500)
+      : candidate.answer.slice(0, 1_500),
+    items: isSafetyQuery ? [] : items,
+  };
+}
+
+export async function askLLM(
+  query: string,
+  accessibleModuleIds: ReadonlySet<string> | null,
+): Promise<LLMAnswer | null> {
   if (!process.env.ANTHROPIC_API_KEY) {
     console.warn("[llm] skipped — ANTHROPIC_API_KEY not set");
     return null;
   }
 
-  console.log("[llm] invoking for query:", query);
+  console.log("[llm] invoking authenticated SpecOS request");
 
   try {
-    const context = await buildMenuContext();
+    const context = await buildMenuContext(accessibleModuleIds);
     console.log("[llm] context built, length:", context.length);
 
     const msg = await client.messages.create({
@@ -241,19 +281,24 @@ export async function askLLM(query: string): Promise<LLMAnswer | null> {
     }
 
     try {
-      const parsed = JSON.parse(jsonStr) as LLMAnswer;
-      if (!parsed.verdict || !parsed.answer) {
-        console.warn("[llm] parsed JSON missing required fields:", raw);
+      const parsed = validateAnswer(query, JSON.parse(jsonStr));
+      if (!parsed) {
+        console.warn("[llm] parsed JSON missing or invalid required fields");
         return null;
       }
       console.log("[llm] success:", parsed.title);
       return parsed;
-    } catch (parseErr) {
-      console.error("[llm] JSON parse failed. Raw response:", raw);
+    } catch {
+      console.error("[llm] JSON parse failed");
       // Fallback: if the model returned plain text instead of JSON, wrap it.
       if (raw.length > 10 && !raw.includes("{")) {
         console.log("[llm] falling back to plain-text wrapper");
-        return { verdict: "info", title: "AI Answer", answer: raw, items: [] };
+        return validateAnswer(query, {
+          verdict: "info",
+          title: "AI Answer",
+          answer: raw,
+          items: [],
+        });
       }
       return null;
     }

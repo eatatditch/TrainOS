@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Zap } from "lucide-react";
+import { SearchCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { DitchMark } from "@/components/brand/ditch-mark";
 
 export function LoginScreen() {
   const [email, setEmail] = useState("");
@@ -25,18 +26,24 @@ export function LoginScreen() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-ditch-orange rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Zap className="w-9 h-9 text-white" />
-          </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-1">SpecOS</h1>
-          <p className="text-gray-500 text-sm">Sign in with your Ditch account</p>
+    <main className="app-canvas relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-10">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-52 bg-ditch-navy" />
+      <div className="relative w-full max-w-sm animate-fade-in">
+        <div className="mb-8 flex justify-center">
+          <DitchMark inverse product="SpecOS" />
         </div>
+        <div className="shell-card p-6 sm:p-8">
+          <div className="mb-7 text-center">
+            <div className="mx-auto mb-4 grid size-12 place-items-center rounded-2xl bg-ditch-sand/60 text-ditch-orange">
+              <SearchCheck className="size-5" />
+            </div>
+            <p className="page-kicker">On-shift answers</p>
+            <h1 className="text-3xl font-black tracking-[-0.045em] text-ditch-ink">Ask SpecOS</h1>
+            <p className="mt-2 text-sm leading-6 text-ditch-navy/55">Sign in with your Ditch team account.</p>
+          </div>
         <form onSubmit={handleLogin} className="space-y-4">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm p-3 rounded-xl text-center">{error}</div>
+            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-center text-sm font-medium text-red-700">{error}</div>
           )}
           <input
             type="email"
@@ -44,7 +51,8 @@ export function LoginScreen() {
             onChange={(e) => setEmail(e.target.value)}
             placeholder="Email"
             required
-            className="w-full px-4 py-3 rounded-xl bg-white border border-gray-300 text-gray-900 placeholder-gray-400 focus:border-ditch-orange focus:ring-0 focus:outline-none text-sm"
+            autoComplete="email"
+            className="min-h-12 w-full rounded-xl border border-ditch-navy/15 bg-white px-4 py-3 text-sm text-ditch-ink outline-none transition-colors placeholder:text-ditch-navy/35 focus:border-ditch-orange"
           />
           <input
             type="password"
@@ -52,18 +60,20 @@ export function LoginScreen() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
             required
-            className="w-full px-4 py-3 rounded-xl bg-white border border-gray-300 text-gray-900 placeholder-gray-400 focus:border-ditch-orange focus:ring-0 focus:outline-none text-sm"
+            autoComplete="current-password"
+            className="min-h-12 w-full rounded-xl border border-ditch-navy/15 bg-white px-4 py-3 text-sm text-ditch-ink outline-none transition-colors placeholder:text-ditch-navy/35 focus:border-ditch-orange"
           />
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 bg-ditch-orange text-white font-medium rounded-xl hover:bg-ditch-orange/90 transition-colors disabled:opacity-50"
+            className="btn-primary w-full"
           >
-            {loading ? "Signing in..." : "Sign In"}
+            {loading ? "Getting answers ready…" : "Enter SpecOS"}
           </button>
         </form>
-        <p className="text-gray-400 text-xs text-center mt-8">Ditch Internal Use Only</p>
+        </div>
+        <p className="mt-6 text-center text-[10px] font-bold uppercase tracking-[0.18em] text-ditch-navy/35">Ditch team access only</p>
       </div>
-    </div>
+    </main>
   );
 }

@@ -66,6 +66,8 @@ export default function EmployeesPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [positionFilter, setPositionFilter] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -83,18 +85,41 @@ export default function EmployeesPage() {
 
   const openNew = () => {
     setForm({ ...emptyForm });
+    setSaveError("");
     setShowModal(true);
   };
 
   const handleSave = async () => {
-    await fetch("/api/admin/employees", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    setShowModal(false);
-    setForm({ ...emptyForm });
-    fetchData();
+    setSaveError("");
+    if (!form.firstName.trim() || !form.lastName.trim() || !form.email.trim()) {
+      setSaveError("First name, last name, and email are required.");
+      return;
+    }
+    if (form.password.length < 12) {
+      setSaveError("Temporary password must be at least 12 characters.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const response = await fetch("/api/admin/employees", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        setSaveError(body?.error || "Could not add this employee. Please try again.");
+        return;
+      }
+      setShowModal(false);
+      setForm({ ...emptyForm });
+      await fetchData();
+    } catch {
+      setSaveError("Could not add this employee. Check your connection and try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const toggleActive = async (emp: Employee) => {
@@ -206,11 +231,12 @@ export default function EmployeesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8 animate-fade-in">
+      <div className="shell-card flex flex-col gap-5 p-6 sm:flex-row sm:items-end sm:justify-between sm:p-7">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Employees</h1>
-          <p className="text-gray-500 mt-1">Manage team members, assign training paths, and track progress</p>
+          <p className="page-kicker">People & development</p>
+          <h1 className="page-title">Crew</h1>
+          <p className="page-subtitle">Set access, assign learning paths, and keep every team member moving.</p>
         </div>
         <Button onClick={openNew} className="flex items-center gap-2">
           <Plus className="w-4 h-4" /> Add Employee
@@ -319,12 +345,18 @@ export default function EmployeesPage() {
       {/* Add Employee Modal */}
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Add Employee" size="lg">
         <div className="space-y-4">
+          {saveError && (
+            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">
+              {saveError}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
-            <Input label="First Name" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} placeholder="John" />
-            <Input label="Last Name" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} placeholder="Doe" />
+            <Input label="First Name" required value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} placeholder="John" />
+            <Input label="Last Name" required value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} placeholder="Doe" />
           </div>
-          <Input label="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="john@eatatditch.com" />
-          <Input label="Password" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Temporary password" />
+          <Input label="Email" type="email" required autoComplete="off" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="john@eatatditch.com" />
+          <Input label="Temporary password" type="password" required minLength={12} autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="At least 12 characters" />
+          <p className="-mt-2 text-xs text-ditch-navy/50">Use a unique 12+ character temporary password and share it privately.</p>
           <div className="grid grid-cols-2 gap-4">
             <Select
               label="Role (permission tier)"
@@ -374,7 +406,7 @@ export default function EmployeesPage() {
 
           <div className="flex gap-3 justify-end pt-2">
             <Button variant="ghost" onClick={() => setShowModal(false)}>Cancel</Button>
-            <Button onClick={handleSave}>Add Employee</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Adding…" : "Add Employee"}</Button>
           </div>
         </div>
       </Modal>

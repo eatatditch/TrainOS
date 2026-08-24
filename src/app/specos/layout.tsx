@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 
-const iconUrl = "https://uwalxhxajdkecucjcdwk.supabase.co/storage/v1/object/public/training-assets/specos-icon.png";
+const iconUrl = "/icon-512.png";
 
 export const metadata: Metadata = {
   title: "SpecOS — Ditch",
@@ -18,16 +18,14 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#cd6028",
+  themeColor: "#143b4b",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
 };
 
 export default function SpecOSLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-ditch-cream">
       {children}
     </div>
   );

@@ -10,7 +10,7 @@ export function KeyTakeaway({
   title = "Key Takeaways",
 }: KeyTakeawayProps) {
   return (
-    <div className="rounded-xl border-l-4 border-l-ditch-green bg-green-50 p-5 my-4 shadow-sm">
+    <div className="my-6 rounded-2xl border border-ditch-green/10 border-l-4 border-l-ditch-green bg-ditch-seafoam/20 p-5 shadow-sm">
       <div className="flex items-center gap-2 mb-3">
         <Star className="text-ditch-green shrink-0" size={20} />
         <p className="font-bold text-ditch-green">{title}</p>
@@ -19,7 +19,7 @@ export function KeyTakeaway({
         {items.map((item, index) => (
           <li
             key={index}
-            className="flex items-start gap-2.5 text-sm text-gray-800"
+            className="flex items-start gap-2.5 text-sm leading-6 text-ditch-ink"
           >
             <span className="text-ditch-green mt-1 shrink-0">&bull;</span>
             <span className="font-medium">{item}</span>

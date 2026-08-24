@@ -1,12 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { MANAGER_ROLES, authorizeApi } from "@/lib/api-auth";
 
 export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
+  const auth = await authorizeApi(MANAGER_ROLES);
+  if (!auth.authorized) return auth.response;
+
   const fileName = request.nextUrl.searchParams.get("file");
   if (!fileName) {
     return NextResponse.json({ error: "file param required" }, { status: 400 });
+  }
+  if (
+    fileName.length > 512 ||
+    fileName.startsWith("/") ||
+    fileName.split("/").some((segment) => segment === "..")
+  ) {
+    return NextResponse.json({ error: "Invalid file path" }, { status: 400 });
   }
 
   try {
@@ -28,7 +39,7 @@ export async function GET(request: NextRequest) {
 
     // DOCX files
     if (fileName.endsWith(".docx")) {
-      const mammoth = require("mammoth");
+      const mammoth = await import("mammoth");
       const result = await mammoth.extractRawText({ buffer });
       return NextResponse.json({ fileName, text: result.value });
     }
@@ -41,8 +52,9 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({ fileName, text: "[Unsupported format]" });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unable to read file";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 

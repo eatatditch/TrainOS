@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { askLLM, shouldUseLLM } from "@/lib/llm";
+import { authorizeApi } from "@/lib/api-auth";
+import { canManageTraining, getAssignedModuleIds } from "@/lib/training-access";
+import { consumeApiRateLimit } from "@/lib/api-rate-limit";
+import { answerCompanyFactQuestion } from "@/lib/company-facts";
 
 export const maxDuration = 30;
 
@@ -26,10 +30,10 @@ const DIETARY_PATTERNS: Record<string, RegExp> = {
 // Category names (lowercased) must match the tag written by
 // /api/admin/menu's buildTags() — i.e. item.category.toLowerCase().
 const CATEGORY_PATTERNS: Record<string, RegExp> = {
-  kids: /\b(kids?|kiddos?|children('s)?|kid's)\b/i,
+  "share + socialize": /\b(starters?|appetizers?|apps|shareables?|shares?)\b/i,
+  "soup + salads": /\b(soups?|salads?)\b/i,
   tacos: /\btacos?\b/i,
   bowls: /\bbowls?\b/i,
-  starters: /\b(starters?|appetizers?|apps)\b/i,
   platos: /\b(platos|plates)\b/i,
   handhelds: /\b(handhelds?|sandwich(es)?|burgers?)\b/i,
   dessert: /\b(desserts?|sweets?)\b/i,
@@ -128,12 +132,12 @@ function parseFoodItem(title: string, content: string, tags: string[]): any {
   const allergens = field("Contains")
     .split(/,\s*/)
     .map((s) => s.trim().toLowerCase())
-    .filter((s) => s && s !== "none");
+    .filter((s) => s && s !== "none" && s !== "unverified");
 
   const dietary = field("Dietary")
     .split(/,\s*/)
     .map((s) => s.trim().toLowerCase())
-    .filter((s) => s && s !== "none");
+    .filter((s) => s && s !== "none" && s !== "unverified");
 
   return {
     name: title,
@@ -145,12 +149,27 @@ function parseFoodItem(title: string, content: string, tags: string[]): any {
     allergens,
     dietary,
     modifications: field("Modifications"),
+    allergyStatus: field("Allergy Status") || "VERIFICATION REQUIRED",
+    allergyWarning:
+      "This menu description is not an allergen certification. Involve a manager and the kitchen to verify the live recipe, preparation, and cross-contact risk before answering an allergy question.",
     tags,
   };
 }
 
 export async function GET(request: NextRequest) {
-  const query = request.nextUrl.searchParams.get("q")?.trim();
+  const auth = await authorizeApi();
+  if (!auth.authorized) return auth.response;
+  if (!(await consumeApiRateLimit(`specos-search:${auth.user.id}`, 45, 60))) {
+    return NextResponse.json(
+      { error: "Too many searches. Wait a moment and try again." },
+      { status: 429, headers: { "Retry-After": "60" } },
+    );
+  }
+  const accessibleModuleIds = canManageTraining(auth.user)
+    ? null
+    : await getAssignedModuleIds(auth.user.id);
+
+  const query = request.nextUrl.searchParams.get("q")?.trim().slice(0, 500);
   if (!query) {
     return NextResponse.json({
       answer: null,
@@ -162,8 +181,6 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  console.log("[search] query:", query);
-
   const queryLower = query.toLowerCase();
   const searchTerms = queryLower.split(/\s+/).filter((t) => t.length > 2);
 
@@ -173,8 +190,24 @@ export async function GET(request: NextRequest) {
       query
     ) && shouldUseLLM(query);
   if (isCompanyQuery) {
-    console.log("[search] company query detected, fast-tracking to LLM");
-    const llmAnswer = await askLLM(query);
+    const controlledAnswer = answerCompanyFactQuestion(query);
+    if (controlledAnswer) {
+      return NextResponse.json({
+        answer: null,
+        recipe: null,
+        foodItem: null,
+        foodList: null,
+        aiAnswer: controlledAnswer,
+        results: [],
+      });
+    }
+    if (!(await consumeApiRateLimit(`specos-ai:${auth.user.id}`, 12, 300))) {
+      return NextResponse.json(
+        { error: "AI lookup limit reached. Use direct menu search or try again shortly." },
+        { status: 429, headers: { "Retry-After": "300" } },
+      );
+    }
+    const llmAnswer = await askLLM(query, accessibleModuleIds);
     if (llmAnswer) {
       return NextResponse.json({
         answer: null,
@@ -227,8 +260,7 @@ export async function GET(request: NextRequest) {
         if (targetDietary === "vegan") return tagSet.has("vegan");
         if (targetDietary === "vegetarian")
           return tagSet.has("vegetarian") || tagSet.has("vegan");
-        if (targetDietary === "gluten-free")
-          return tagSet.has("gluten-free") || tagSet.has("gluten-friendly");
+        if (targetDietary === "gluten-free") return tagSet.has("gluten-free");
         if (targetDietary === "dairy-free")
           return tagSet.has("dairy-free") && !tagSet.has("contains-dairy");
         if (targetDietary === "pescatarian")
@@ -269,6 +301,30 @@ export async function GET(request: NextRequest) {
 
     if (matches.length > 0) {
       const items = matches.map((m: any) => parseFoodItem(m.title, m.content, m.tags));
+      const requiresSafetyVerification = Boolean(
+        targetAllergen ||
+          targetDietary === "gluten-free" ||
+          targetDietary === "dairy-free" ||
+          /\b(celiac|allerg(?:y|ic|en))\b/i.test(query),
+      );
+
+      if (requiresSafetyVerification) {
+        return NextResponse.json({
+          answer: null,
+          recipe: null,
+          foodItem: null,
+          foodList: null,
+          aiAnswer: {
+            verdict: "warning",
+            title: "Manager + kitchen verification required",
+            answer:
+              "These are only possible matches from the current training record—not an allergy clearance. Mark the allergy, involve a manager, and have the kitchen verify the live ingredients, preparation, and cross-contact risk before promising or serving anything.",
+            items: [],
+          },
+          results: [],
+        });
+      }
+
       const categoryLabel = targetCategories.join(" ");
       const label = targetCategories.length > 0
         ? (targetDietary
@@ -277,7 +333,7 @@ export async function GET(request: NextRequest) {
             ? `${categoryLabel} items without ${targetAllergen}`
             : `${categoryLabel} menu`)
         : targetDietary
-        ? targetDietary.replace(/-/g, " ") + " items"
+        ? `Recorded ${targetDietary.replace(/-/g, " ")} candidates — verify current prep`
         : `items without ${targetAllergen}`;
       return NextResponse.json({
         answer: null,
@@ -292,10 +348,17 @@ export async function GET(request: NextRequest) {
   // ─── Step 2: Recipe Match ──────────────────────────────────────────────────
   const { data: recipeIndex } = await db
     .from("SearchIndex")
-    .select("*, module:Module(title, slug, section:Section(title, slug))")
+    .select("*, module:Module(title, slug, isActive, section:Section(title, slug, isActive))")
     .eq("contentType", "recipe");
 
   const scoredRecipes = (recipeIndex || [])
+    .filter(
+      (item: any) =>
+        item.moduleId &&
+        item.module?.isActive &&
+          item.module?.section?.isActive &&
+          (accessibleModuleIds === null || accessibleModuleIds.has(item.moduleId)),
+    )
     .map((item: any) => {
       const titleLower = item.title.toLowerCase();
       const allTags = (item.tags || []).map((t: string) => t.toLowerCase());
@@ -337,6 +400,39 @@ export async function GET(request: NextRequest) {
       },
       results: [],
     });
+  }
+
+  // ─── Step 2.5: Printed offers and rotating beverage snapshots ─────────────
+  if (!targetAllergen && !targetDietary) {
+    const { data: menuInfoIndex } = await db
+      .from("SearchIndex")
+      .select("id, title, content, tags")
+      .eq("contentType", "menu-info");
+    const scoredMenuInfo = (menuInfoIndex || [])
+      .map((item: any) => {
+        const haystack = `${item.title} ${item.content} ${(item.tags || []).join(" ")}`.toLowerCase();
+        let score = cleaned && haystack.includes(cleaned) ? 200 : 0;
+        for (const term of searchTerms) if (haystack.includes(term)) score += 25;
+        return { ...item, score };
+      })
+      .filter((item: any) => item.score >= 50)
+      .sort((a: any, b: any) => b.score - a.score);
+    if (scoredMenuInfo.length > 0) {
+      const top = scoredMenuInfo[0];
+      return NextResponse.json({
+        answer: null,
+        recipe: null,
+        foodItem: null,
+        foodList: null,
+        aiAnswer: {
+          verdict: "info",
+          title: top.title,
+          answer: top.content,
+          items: [],
+        },
+        results: [],
+      });
+    }
   }
 
   // ─── Step 3: Food Item Match ───────────────────────────────────────────────
@@ -382,12 +478,12 @@ export async function GET(request: NextRequest) {
         w.toLowerCase().includes(targetAllergen)
       );
       allergyVerdict = {
-        safe: !contains && !crossMatch,
+        safe: false,
         text: contains
-          ? `⚠️ ${foodItem.name} contains ${targetAllergen} — NOT safe for ${targetAllergen} allergies.`
+          ? `Current records flag ${targetAllergen} in ${foodItem.name}. Do not serve it for that allergy; involve a manager and have the kitchen verify the current build.`
           : crossMatch
-          ? `⚠️ Cross-contamination risk: ${foodItem.crossWarnings.find((w: string) => w.toLowerCase().includes(targetAllergen)) || ""}`
-          : `${foodItem.name} does not contain ${targetAllergen}. Always confirm with the kitchen for cross-contamination.`,
+          ? `Cross-contact warning: ${foodItem.crossWarnings.find((w: string) => w.toLowerCase().includes(targetAllergen)) || "Current prep may expose this item."} Involve a manager and the kitchen.`
+          : `Verification required: the training record does not currently flag ${targetAllergen}, but that is not an allergy clearance. A manager and the kitchen must verify the live ingredients and cross-contact risk.`,
       };
     } else if (targetDietary) {
       const tagSet = new Set((top.tags || []).map((t: string) => t.toLowerCase()));
@@ -395,18 +491,17 @@ export async function GET(request: NextRequest) {
       if (targetDietary === "vegan") ok = tagSet.has("vegan");
       else if (targetDietary === "vegetarian")
         ok = tagSet.has("vegetarian") || tagSet.has("vegan");
-      else if (targetDietary === "gluten-free")
-        ok = tagSet.has("gluten-free") || tagSet.has("gluten-friendly");
+      else if (targetDietary === "gluten-free") ok = tagSet.has("gluten-free");
       else if (targetDietary === "dairy-free")
         ok = tagSet.has("dairy-free") && !tagSet.has("contains-dairy");
       else if (targetDietary === "pescatarian")
         ok = tagSet.has("pescatarian") || tagSet.has("vegetarian") || tagSet.has("vegan");
 
       allergyVerdict = {
-        safe: ok,
+        safe: false,
         text: ok
-          ? `✓ ${foodItem.name} is ${targetDietary.replace(/-/g, " ")}.`
-          : `${foodItem.name} is not strictly ${targetDietary.replace(/-/g, " ")} as written. See modifications below.`,
+          ? `Recorded as a ${targetDietary.replace(/-/g, " ")} candidate. Verify the current recipe, preparation, and any guest-specific restriction with a manager and the kitchen before serving.`
+          : `${foodItem.name} is not recorded as strictly ${targetDietary.replace(/-/g, " ")} as written. Do not promise a modification until a manager and the kitchen confirm it.`,
       };
     }
 
@@ -422,8 +517,13 @@ export async function GET(request: NextRequest) {
 
   // ─── Step 3.5: LLM for complex questions with no direct match ────────────
   if (shouldUseLLM(query)) {
-    console.log("[search] no recipe/food match, calling LLM for:", query);
-    const earlyLLM = await askLLM(query);
+    if (!(await consumeApiRateLimit(`specos-ai:${auth.user.id}`, 12, 300))) {
+      return NextResponse.json(
+        { error: "AI lookup limit reached. Use direct menu search or try again shortly." },
+        { status: 429, headers: { "Retry-After": "300" } },
+      );
+    }
+    const earlyLLM = await askLLM(query, accessibleModuleIds);
     if (earlyLLM) {
       return NextResponse.json({
         answer: null,
@@ -439,13 +539,18 @@ export async function GET(request: NextRequest) {
   // ─── Step 4: Module Content Search ─────────────────────────────────────────
   const { data: modules } = await db
     .from("Module")
-    .select("id, title, slug, description, content, tags, section:Section(title, slug)")
+    .select("id, title, slug, description, content, tags, section:Section(title, slug, isActive)")
     .eq("isActive", true);
 
   const stripHtml = (html: string) =>
     html.replace(/<[^>]*>/g, " ").replace(/&[^;]+;/g, " ").replace(/\s+/g, " ").trim();
 
   const scoredModules = (modules || [])
+    .filter(
+      (module: any) =>
+        module.section?.isActive &&
+        (accessibleModuleIds === null || accessibleModuleIds.has(module.id)),
+    )
     .map((mod: any) => {
       const plainContent = stripHtml(mod.content || "");
       const allText = `${mod.title} ${mod.description || ""} ${plainContent} ${(mod.tags || []).join(" ")}`.toLowerCase();
@@ -531,7 +636,11 @@ function parseRecipe(title: string, content: string): any {
   const noteMatch = content.match(/Note:\s*([^\n]+)/i);
   const yieldMatch = content.match(/Yield:\s*([^\n|]+)/i);
   const shelfMatch = content.match(/Shelf Life:\s*([^\n|]+)/i);
-  const priceMatch = content.match(/\((\$\d+)\)/);
+  const priceMatch = content.match(/\((\$\d+(?:\.\d{1,2})?)\)/);
+  const trainingStatusMatch = content.match(/^Training Status:\s*([^\n]+)/im);
+  const trainingStatus = trainingStatusMatch?.[1]?.trim() || "VERIFICATION REQUIRED";
+  const locked = /verification required|do not train|do not build/i.test(trainingStatus);
+  const allergyLineMatch = content.match(/^Allergy Warning:\s*([^\n]+)/im);
   const ingredientsMatch = content.match(
     /Ingredients:\s*([\s\S]*?)(?=\nGarnish:|\nNote:|\nProcedure:|\n⚠|$)/i
   );
@@ -543,8 +652,7 @@ function parseRecipe(title: string, content: string): any {
       .map((i) => i.trim())
       .filter((i) => i.length > 0);
   }
-  const hasNutWarning =
-    content.includes("CONTAINS NUTS") || content.includes("NUT ALLERGY");
+  const hasNutWarning = /contains nuts|nut allergy|almond concern/i.test(content);
   return {
     name,
     glass,
@@ -553,8 +661,10 @@ function parseRecipe(title: string, content: string): any {
     garnish: garnishMatch ? garnishMatch[1].trim() : "",
     note: noteMatch ? noteMatch[1].trim() : "",
     price: priceMatch ? priceMatch[1] : "",
+    trainingStatus,
+    locked,
     yield: yieldMatch ? yieldMatch[1].trim() : "",
     shelfLife: shelfMatch ? shelfMatch[1].trim() : "",
-    allergyWarning: hasNutWarning ? "⚠️ CONTAINS NUTS" : "",
+    allergyWarning: allergyLineMatch?.[1]?.trim() || (hasNutWarning ? "CONTAINS NUTS — manager and kitchen verification required." : ""),
   };
 }

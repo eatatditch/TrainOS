@@ -7,13 +7,17 @@ import { Badge } from "@/components/ui/badge";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { formatDuration, formatDate } from "@/lib/utils";
 import { ArrowLeft, ArrowRight, Clock, CheckCircle2, FileText, Video, Image as ImageIcon, ClipboardCheck, Lock } from "lucide-react";
+import { canManageTraining, getAssignedModuleIds } from "@/lib/training-access";
 
 export default async function SectionPage({ params }: { params: Promise<{ sectionSlug: string }> }) {
   const { sectionSlug } = await params;
   const user = await getUser();
-  const userId = user?.id;
-
-  const isAdmin = user ? ["SUPER_ADMIN", "ADMIN", "MANAGER"].includes(user.role) : false;
+  if (!user) redirect("/login");
+  const userId = user.id;
+  const isAdmin = canManageTraining(user);
+  const assignedModuleIds = isAdmin
+    ? null
+    : await getAssignedModuleIds(user.id);
 
   // Fetch section with modules
   const { data: sectionData } = await db
@@ -25,39 +29,33 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
 
   if (!sectionData) notFound();
 
-  // Check if employee is assigned to any training path that includes modules in this section
-  if (userId && !isAdmin) {
-    const { data: userPaths } = await db
-      .from("UserTrainingPath")
-      .select("trainingPath:TrainingPath(modules:TrainingPathModule(moduleId))")
-      .eq("userId", userId);
+  const visibleSectionModules = (sectionData.modules || [])
+    .filter(
+      (module: any) =>
+        module.isActive &&
+        (assignedModuleIds === null || assignedModuleIds.has(module.id)),
+    )
+    .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
 
-    const assignedModuleIds = new Set<string>();
-    (userPaths || []).forEach((up: any) => {
-      (up.trainingPath?.modules || []).forEach((tpm: any) => {
-        if (tpm.moduleId) assignedModuleIds.add(tpm.moduleId);
-      });
-    });
-
-    const sectionModuleIds = (sectionData.modules || []).map((m: any) => m.id);
-    const hasAssignedModule = sectionModuleIds.some((id: string) => assignedModuleIds.has(id));
-
-    if (!hasAssignedModule) {
-      redirect("/training");
-    }
-  }
+  if (visibleSectionModules.length === 0) redirect("/training");
 
   // Fetch all sections for sequential order + next section navigation
   const { data: allSections } = await db
     .from("Section")
-    .select("id, slug, sortOrder, title, modules:Module(id)")
+    .select("id, slug, sortOrder, title, modules:Module(id, isActive)")
     .eq("isActive", true)
     .order("sortOrder");
 
-  const sortedSections = (allSections || []).map((s: any) => ({
-    ...s,
-    modules: (s.modules || []),
-  }));
+  const sortedSections = (allSections || [])
+    .map((section: any) => ({
+      ...section,
+      modules: (section.modules || []).filter(
+        (module: any) =>
+          module.isActive &&
+          (assignedModuleIds === null || assignedModuleIds.has(module.id)),
+      ),
+    }))
+    .filter((section: any) => section.modules.length > 0);
 
   const currentIdx = sortedSections.findIndex((s: any) => s.id === sectionData.id);
   const nextSection = currentIdx >= 0 && currentIdx < sortedSections.length - 1
@@ -66,7 +64,7 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
   const isLastSection = currentIdx === sortedSections.length - 1;
 
   // Enforce sequential section order — check if previous section is complete
-  if (userId && currentIdx > 0) {
+  if (!isAdmin && currentIdx > 0) {
     const prevSection = sortedSections[currentIdx - 1];
     const prevModuleIds = prevSection.modules.map((m: any) => m.id);
 
@@ -86,9 +84,7 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
 
   const section = {
     ...sectionData,
-    modules: (sectionData.modules || [])
-      .filter((m: any) => m.isActive)
-      .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
+    modules: visibleSectionModules,
   };
 
   // Fetch section-level quiz
@@ -127,22 +123,25 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
   const hasPassed = quizAttempts.some((a: any) => a.passed);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Link href="/training" className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-          <ArrowLeft className="w-5 h-5 text-gray-500" />
+    <div className="space-y-8 animate-fade-in">
+      <section className="rounded-[2rem] bg-ditch-navy p-6 text-white shadow-[var(--shadow-lift)] sm:p-8">
+      <div className="flex items-start gap-4">
+        <Link href="/training" aria-label="Back to playbook" className="grid size-11 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.07] transition-colors hover:bg-white/15">
+          <ArrowLeft className="size-5 text-white/70" />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{section.title}</h1>
-          <p className="text-gray-500 mt-1">{section.description}</p>
+          <p className="mb-2 text-[10px] font-extrabold uppercase tracking-[0.22em] text-ditch-seafoam">Training stage</p>
+          <h1 className="text-3xl font-black tracking-[-0.045em] sm:text-4xl">{section.title}</h1>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-white/60">{section.description}</p>
         </div>
       </div>
+      </section>
 
       {section.modules.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+        <div className="shell-card p-5">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium text-gray-700">Section Progress</span>
-            <span className="text-sm text-gray-500">{completedCount} of {section.modules.length} completed</span>
+            <span className="text-xs font-extrabold uppercase tracking-[0.12em] text-ditch-navy/60">Stage progress</span>
+            <span className="text-xs font-bold text-ditch-navy/45">{completedCount} of {section.modules.length} complete</span>
           </div>
           <ProgressBar value={completedCount} max={section.modules.length} showLabel={false} />
         </div>
@@ -160,13 +159,13 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
 
           if (!isAccessible) {
             return (
-              <Card key={mod.id} className="flex items-center gap-4 opacity-50">
-                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-gray-100 text-gray-400">
+              <Card key={mod.id} className="flex items-center gap-4 border-dashed bg-white/50 opacity-60 shadow-none">
+                <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-ditch-navy/[0.06] text-ditch-navy/35">
                   <Lock className="w-4 h-4" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <h3 className="font-medium text-gray-400 truncate">{mod.title}</h3>
+                    <h3 className="truncate font-bold text-ditch-navy/45">{mod.title}</h3>
                   </div>
                   <p className="text-sm text-gray-400 mt-0.5">Complete the previous module to unlock</p>
                 </div>
@@ -176,9 +175,9 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
 
           return (
             <Link key={mod.id} href={`/training/${sectionSlug}/${mod.slug}`}>
-              <Card hover className="flex items-center gap-4">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                  isCompleted ? "bg-ditch-green text-white" : "bg-ditch-orange/10 text-ditch-orange"
+              <Card hover className="group flex items-center gap-4 sm:gap-5">
+                <div className={`grid size-12 shrink-0 place-items-center rounded-2xl ${
+                  isCompleted ? "bg-ditch-green text-white" : "bg-ditch-sand/60 text-ditch-orange"
                 }`}>
                   {isCompleted ? (
                     <CheckCircle2 className="w-5 h-5" />
@@ -188,11 +187,11 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <h3 className="font-medium text-gray-900 truncate">{mod.title}</h3>
+                    <h3 className="truncate font-extrabold tracking-tight text-ditch-ink">{mod.title}</h3>
                     {mod.isRequired && <Badge variant="required">Required</Badge>}
                     {isCompleted && <Badge variant="completed">Complete</Badge>}
                   </div>
-                  <p className="text-sm text-gray-500 truncate mt-0.5">{mod.description}</p>
+                  <p className="mt-1 truncate text-sm text-ditch-navy/55">{mod.description}</p>
                   <div className="flex items-center gap-3 mt-2">
                     {mod.estimatedMinutes && (
                       <span className="text-xs text-gray-400 flex items-center gap-1">

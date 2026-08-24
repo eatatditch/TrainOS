@@ -10,14 +10,14 @@ export function Badge({ variant = "default", children, className }: BadgeProps) 
   return (
     <span
       className={cn(
-        "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.08em]",
         {
-          "bg-gray-100 text-gray-700": variant === "default",
-          "bg-red-100 text-red-700": variant === "required",
-          "bg-gray-100 text-gray-500": variant === "optional",
-          "bg-green-100 text-green-700": variant === "completed",
-          "bg-red-100 text-red-700 animate-pulse": variant === "overdue",
-          "bg-blue-100 text-blue-700": variant === "in-progress",
+          "border-ditch-navy/10 bg-ditch-navy/[0.06] text-ditch-navy/75": variant === "default",
+          "border-red-200 bg-red-50 text-red-700": variant === "required",
+          "border-ditch-navy/10 bg-ditch-sand/30 text-ditch-navy/55": variant === "optional",
+          "border-ditch-green/20 bg-ditch-seafoam/25 text-ditch-green": variant === "completed",
+          "border-red-300 bg-red-50 text-red-700": variant === "overdue",
+          "border-ditch-orange/20 bg-ditch-orange/[0.08] text-ditch-orange": variant === "in-progress",
         },
         className
       )}

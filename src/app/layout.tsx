@@ -1,30 +1,28 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
-
 export const metadata: Metadata = {
-  title: "Ditch Training",
-  description: "Internal training and knowledge center for Ditch team members",
+  title: {
+    default: "TrainOS — Ditch",
+    template: "%s — TrainOS",
+  },
+  description: "The Ditch team operating system for hospitality, menu mastery, and shift-ready training.",
   manifest: "/manifest.json",
   icons: {
-    icon: "/api/icon",
-    apple: "/api/icon",
+    icon: "/icon-512.png",
+    apple: "/icon-512.png",
   },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Ditch Training",
+    title: "Ditch TrainOS",
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#cd6028",
+  themeColor: "#143b4b",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
 };
 
 export default function RootLayout({
@@ -34,7 +32,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>{children}</body>
+      <body className="min-h-screen">{children}</body>
     </html>
   );
 }

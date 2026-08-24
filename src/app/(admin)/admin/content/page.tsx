@@ -101,7 +101,7 @@ export default function ContentManagerPage() {
   };
 
   const handleDeleteSection = async (id: string) => {
-    if (!confirm("Delete this section and all its modules? This cannot be undone.")) return;
+    if (!confirm("Archive this section and hide its modules from current training? Historical records will be preserved.")) return;
     await fetch(`/api/admin/sections/${id}`, { method: "DELETE" });
     fetchSections();
   };
@@ -136,11 +136,12 @@ export default function ContentManagerPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8 animate-fade-in">
+      <div className="shell-card flex flex-col gap-5 p-6 sm:flex-row sm:items-end sm:justify-between sm:p-7">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Content Manager</h1>
-          <p className="text-gray-500 mt-1">Manage training sections and modules</p>
+          <p className="page-kicker">The operating playbook</p>
+          <h1 className="page-title">Playbook</h1>
+          <p className="page-subtitle">Build the standards, lessons, and coaching reps the team sees.</p>
         </div>
         <Button onClick={openNewSection} className="flex items-center gap-2">
           <Plus className="w-4 h-4" /> Add Section

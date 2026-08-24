@@ -1,21 +1,18 @@
 import { cn } from "@/lib/utils";
 
-interface CardProps {
-  children: React.ReactNode;
-  className?: string;
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   hover?: boolean;
-  onClick?: () => void;
 }
 
-export function Card({ children, className, hover, onClick }: CardProps) {
+export function Card({ children, className, hover, ...props }: CardProps) {
   return (
     <div
       className={cn(
-        "bg-white rounded-xl shadow-sm border border-gray-100 p-6",
-        hover && "hover:shadow-md hover:border-gray-200 transition-all cursor-pointer",
+        "rounded-2xl border border-ditch-navy/10 bg-white/95 p-5 shadow-[var(--shadow-surf)] sm:p-6",
+        hover && "cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:border-ditch-orange/25 hover:shadow-[var(--shadow-lift)]",
         className
       )}
-      onClick={onClick}
+      {...props}
     >
       {children}
     </div>
@@ -23,15 +20,15 @@ export function Card({ children, className, hover, onClick }: CardProps) {
 }
 
 export function CardHeader({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn("mb-4", className)}>{children}</div>;
+  return <div className={cn("mb-5", className)}>{children}</div>;
 }
 
 export function CardTitle({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <h3 className={cn("text-lg font-semibold text-gray-900", className)}>{children}</h3>;
+  return <h3 className={cn("text-lg font-extrabold tracking-[-0.025em] text-ditch-ink", className)}>{children}</h3>;
 }
 
 export function CardDescription({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <p className={cn("text-sm text-gray-500 mt-1", className)}>{children}</p>;
+  return <p className={cn("mt-1 text-sm leading-6 text-ditch-navy/60", className)}>{children}</p>;
 }
 
 export function CardContent({ children, className }: { children: React.ReactNode; className?: string }) {
