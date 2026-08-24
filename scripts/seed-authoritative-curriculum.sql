@@ -169,11 +169,21 @@ INSERT INTO "TrainingPathModule" ("trainingPathId", "moduleId", "sortOrder", "is
 UPDATE "Section" SET "isActive" = false WHERE "isActive" = true AND id NOT IN ('sec-hospitality-reset', 'sec-leadership-operating-system', 'sec-daily-masterminds', 'sec-trainer-operating-system', 'sec-server-onboarding', 'sec-bartender-onboarding', 'sec-support-onboarding');
 UPDATE "Module" SET "isActive" = false WHERE "isActive" = true AND id NOT IN ('cur-reset-promise-care', 'cur-reset-baseline-magic', 'cur-reset-whole-room', 'cur-reset-passion-selling', 'cur-reset-source-safety', 'cur-reset-last', 'cur-reset-accountability', 'cur-reset-live-certification', 'cur-leadership-week-0', 'cur-leadership-week-1', 'cur-leadership-week-2', 'cur-leadership-week-3', 'cur-leadership-week-4', 'cur-leadership-week-5', 'cur-leadership-week-6', 'cur-leadership-week-7', 'cur-leadership-week-8', 'cur-mastermind-unconditional-hospitality', 'cur-mastermind-passion-selling', 'cur-mastermind-last-recovery', 'cur-mastermind-accountability-without-ego', 'cur-trainer-identity-selection', 'cur-trainer-seven-step-method', 'cur-trainer-shift-autonomy', 'cur-trainer-coaching-learning', 'cur-trainer-four-labs', 'cur-trainer-certification-audit', 'cur-trainer-final-practical', 'cur-server-identity-readiness', 'cur-server-guest-journey', 'cur-server-food-menu', 'cur-server-beverage-menu', 'cur-server-passion-selling', 'cur-server-pos-pacing-safety', 'cur-server-recovery-payment', 'cur-server-final-practical', 'cur-bartender-identity-journey', 'cur-bartender-safe-responsible', 'cur-bartender-station-technique', 'cur-bartender-approved-signatures-1', 'cur-bartender-approved-signatures-2', 'cur-bartender-locked-rotating', 'cur-bartender-passion-pairing', 'cur-bartender-ticket-recovery', 'cur-bartender-open-close-control', 'cur-bartender-final-practical', 'cur-support-shared-core', 'cur-support-safety-map', 'cur-support-host-branch', 'cur-support-busser-branch', 'cur-support-runner-branch', 'cur-support-volume-system', 'cur-support-guest-questions-recovery', 'cur-support-final-practical');
 UPDATE "TrainingPath" SET "isActive" = false WHERE "isActive" = true AND id NOT IN ('path-hospitality-reset', 'path-leadership-operating-system', 'path-daily-masterminds', 'path-trainer-operating-system', 'path-server-onboarding', 'path-bartender-onboarding', 'path-support-onboarding');
+UPDATE "UserTrainingPath" utp
+SET "isActive" = false
+WHERE utp."isActive" = true
+  AND EXISTS (
+    SELECT 1
+    FROM "TrainingPath" path
+    WHERE path.id = utp."trainingPathId"
+      AND path."isActive" = false
+  );
 
 -- Reconcile every active employee onto the all-team Hospitality Reset plus
 -- every current path matching their explicit position.
 -- Rollout deadlines start now for established employees so historic hire dates do not
--- make the replacement curriculum immediately overdue. Existing links remain untouched.
+-- make the replacement curriculum immediately overdue. Existing current-path links retain
+-- their original deadlines; links to retired paths remain preserved as inactive history.
 WITH applicable_paths AS (
   SELECT
     u.id AS user_id,

@@ -244,11 +244,21 @@ try {
     `UPDATE "Section" SET "isActive" = false WHERE "isActive" = true AND id NOT IN (${sectionIds.map(sqlString).join(", ")});`,
     `UPDATE "Module" SET "isActive" = false WHERE "isActive" = true AND id NOT IN (${curriculumModuleIds.map(sqlString).join(", ")});`,
     `UPDATE "TrainingPath" SET "isActive" = false WHERE "isActive" = true AND id NOT IN (${pathIds.map(sqlString).join(", ")});`,
+    `UPDATE "UserTrainingPath" utp
+SET "isActive" = false
+WHERE utp."isActive" = true
+  AND EXISTS (
+    SELECT 1
+    FROM "TrainingPath" path
+    WHERE path.id = utp."trainingPathId"
+      AND path."isActive" = false
+  );`,
     "",
     "-- Reconcile every active employee onto the all-team Hospitality Reset plus",
     "-- every current path matching their explicit position.",
     "-- Rollout deadlines start now for established employees so historic hire dates do not",
-    "-- make the replacement curriculum immediately overdue. Existing links remain untouched.",
+    "-- make the replacement curriculum immediately overdue. Existing current-path links retain",
+    "-- their original deadlines; links to retired paths remain preserved as inactive history.",
     `WITH applicable_paths AS (
   SELECT
     u.id AS user_id,
